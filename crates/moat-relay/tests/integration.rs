@@ -8,10 +8,16 @@ use moat_core::{
 };
 use moat_relay::MessageRouter;
 use moat_runtime::{AuditEventKind, MonitorThresholds, SecretProxy};
-use uuid::Uuid;
 
 fn make_policy() -> PolicyBinding {
     PolicyBinding::new("integration-test-v1", b"integration test policy document")
+}
+
+/// Register an agent with both the registry and PEP, and add as trusted root.
+fn register_agent(router: &mut MessageRouter, kp: &AgentKeypair) {
+    router.registry.register(kp.identity.clone()).unwrap();
+    router.pep.register_identity(kp.identity.clone());
+    router.pep.add_trusted_root(kp.id());
 }
 
 /// Full end-to-end: register agents, exchange messages, verify PEP, check audit.
@@ -20,21 +26,11 @@ fn two_agents_communicate_through_pep() {
     let policy = make_policy();
     let mut router = MessageRouter::new(policy.clone(), MonitorThresholds::default());
 
-    // Create two agents
     let agent_a = AgentKeypair::generate("agent-alpha").unwrap();
     let agent_b = AgentKeypair::generate("agent-beta").unwrap();
 
-    // Register both
-    router
-        .registry
-        .register(agent_a.identity.clone())
-        .unwrap();
-    router
-        .registry
-        .register(agent_b.identity.clone())
-        .unwrap();
-    router.pep.register_identity(agent_a.identity.clone());
-    router.pep.register_identity(agent_b.identity.clone());
+    register_agent(&mut router, &agent_a);
+    register_agent(&mut router, &agent_b);
 
     // Agent A creates a capability token granting tool access
     let mut cap_a = CapabilityToken::root(
@@ -52,19 +48,22 @@ fn two_agents_communicate_through_pep() {
         network_allowed: false,
         ..Default::default()
     };
+    cap_a.sign(&agent_a);
 
-    // Agent A sends a message to Agent B
     let msg_1 = AuthenticatedMessage::create(
         &agent_a,
         agent_b.id(),
         b"please review this code".to_vec(),
         cap_a.clone(),
+        vec![],
         policy.clone(),
         1,
     )
     .unwrap();
 
-    let result = router.route(&msg_1, "tool://code_review", "execute").unwrap();
+    let result = router
+        .route(&msg_1, "tool://code_review", "execute")
+        .unwrap();
     assert!(result.allowed, "valid message should be allowed");
 
     // Agent B responds
@@ -78,12 +77,14 @@ fn two_agents_communicate_through_pep() {
         actions: vec!["execute".into()],
     }];
     cap_b.resource_limits = ResourceLimits::default();
+    cap_b.sign(&agent_b);
 
     let msg_2 = AuthenticatedMessage::create(
         &agent_b,
         agent_a.id(),
         b"review complete, 3 issues found".to_vec(),
         cap_b,
+        vec![],
         policy.clone(),
         1,
     )
@@ -92,11 +93,9 @@ fn two_agents_communicate_through_pep() {
     let result = router.route(&msg_2, "tool://report", "execute").unwrap();
     assert!(result.allowed, "response should be allowed");
 
-    // Verify audit log integrity
     assert!(router.audit_log.verify_integrity().is_ok());
     assert_eq!(router.audit_log.len(), 2);
 
-    // Verify audit contains correct entries
     let entries = router.audit_log.entries();
     match &entries[0].event {
         AuditEventKind::PepDecision {
@@ -118,8 +117,8 @@ fn invalid_signature_rejected() {
     let agent_a = AgentKeypair::generate("agent-alpha").unwrap();
     let agent_b = AgentKeypair::generate("agent-beta").unwrap();
 
-    router.pep.register_identity(agent_a.identity.clone());
-    router.pep.register_identity(agent_b.identity.clone());
+    register_agent(&mut router, &agent_a);
+    register_agent(&mut router, &agent_b);
 
     let mut cap = CapabilityToken::root(
         agent_a.id(),
@@ -130,12 +129,14 @@ fn invalid_signature_rejected() {
         resource: "tool://*".into(),
         actions: vec!["execute".into()],
     }];
+    cap.sign(&agent_a);
 
     let mut msg = AuthenticatedMessage::create(
         &agent_a,
         agent_b.id(),
         b"hello".to_vec(),
         cap,
+        vec![],
         policy.clone(),
         1,
     )
@@ -147,7 +148,6 @@ fn invalid_signature_rejected() {
     let result = router.route(&msg, "tool://test", "execute").unwrap();
     assert!(!result.allowed, "tampered message must be rejected");
 
-    // Audit records the rejection
     assert!(router.audit_log.verify_integrity().is_ok());
     match &router.audit_log.entries()[0].event {
         AuditEventKind::PepDecision { allowed, .. } => assert!(!allowed),
@@ -164,8 +164,8 @@ fn capability_attenuation_enforced() {
     let manager = AgentKeypair::generate("manager").unwrap();
     let worker = AgentKeypair::generate("worker").unwrap();
 
-    router.pep.register_identity(manager.identity.clone());
-    router.pep.register_identity(worker.identity.clone());
+    register_agent(&mut router, &manager);
+    register_agent(&mut router, &worker);
 
     // Manager has broad tool access
     let mut manager_cap = CapabilityToken::root(
@@ -184,9 +184,10 @@ fn capability_attenuation_enforced() {
         allowed_hosts: vec!["api.example.com".into()],
         ..Default::default()
     };
+    manager_cap.sign(&manager);
 
     // Manager delegates to worker with restricted scope (read-only, one tool)
-    let worker_cap = manager_cap
+    let mut worker_cap = manager_cap
         .attenuate(
             worker.id(),
             vec![ScopeEntry {
@@ -202,6 +203,7 @@ fn capability_attenuation_enforced() {
             10,
         )
         .unwrap();
+    worker_cap.sign(&manager);
 
     // Worker can read code_review
     let msg_ok = AuthenticatedMessage::create(
@@ -209,6 +211,7 @@ fn capability_attenuation_enforced() {
         manager.id(),
         b"reading review".to_vec(),
         worker_cap.clone(),
+        vec![manager_cap.clone()],
         policy.clone(),
         1,
     )
@@ -224,6 +227,7 @@ fn capability_attenuation_enforced() {
         manager.id(),
         b"trying to execute".to_vec(),
         worker_cap.clone(),
+        vec![manager_cap.clone()],
         policy.clone(),
         2,
     )
@@ -242,6 +246,7 @@ fn capability_attenuation_enforced() {
         manager.id(),
         b"trying other tool".to_vec(),
         worker_cap,
+        vec![manager_cap.clone()],
         policy.clone(),
         3,
     )
@@ -258,7 +263,7 @@ fn capability_attenuation_enforced() {
     let broaden_result = manager_cap.attenuate(
         worker.id(),
         vec![ScopeEntry {
-            resource: "file://*".into(), // not in parent scope
+            resource: "file://*".into(),
             actions: vec!["write".into()],
         }],
         vec![],
@@ -281,21 +286,17 @@ fn secret_proxy_handle_resolution() {
 
     let mut proxy = SecretProxy::new();
 
-    // Store an API key accessible only to agent_a
     let handle = proxy.store("openai_key", "sk-secret-12345", vec![agent_a.id()]);
 
-    // Agent A can resolve
     let injection = proxy
         .resolve_for_header(&handle, agent_a.id(), "Authorization")
         .unwrap();
     assert_eq!(injection.header_name, "Authorization");
     assert_eq!(injection.secret_value, "sk-secret-12345");
 
-    // Agent B cannot resolve
     let result = proxy.resolve_for_header(&handle, agent_b.id(), "Authorization");
     assert!(result.is_err());
 
-    // After revocation, agent A also cannot resolve
     proxy.revoke(&handle, agent_a.id());
     let result = proxy.resolve_for_header(&handle, agent_a.id(), "Authorization");
     assert!(result.is_err());
@@ -316,7 +317,9 @@ fn monitor_alerts_on_excessive_actions() {
     );
 
     let agent = AgentKeypair::generate("busy-agent").unwrap();
-    router.pep.register_identity(agent.identity.clone());
+    let recipient = AgentKeypair::generate("recipient").unwrap();
+    register_agent(&mut router, &agent);
+    register_agent(&mut router, &recipient);
 
     let mut cap = CapabilityToken::root(
         agent.id(),
@@ -328,14 +331,15 @@ fn monitor_alerts_on_excessive_actions() {
         actions: vec!["execute".into()],
     }];
     cap.resource_limits = ResourceLimits::default();
+    cap.sign(&agent);
 
-    // Send 3 messages (the 3rd should trigger an alert)
     for seq in 1..=3 {
         let msg = AuthenticatedMessage::create(
             &agent,
-            Uuid::new_v4(),
+            recipient.id(),
             format!("action {}", seq).into_bytes(),
             cap.clone(),
+            vec![],
             policy.clone(),
             seq,
         )
@@ -351,9 +355,7 @@ fn monitor_alerts_on_excessive_actions() {
         }
     }
 
-    // Audit log has PEP decisions + monitor alert
     assert!(router.audit_log.verify_integrity().is_ok());
-    // 3 PEP decisions + 1 monitor alert = 4 entries
     assert_eq!(router.audit_log.len(), 4);
 }
 
@@ -364,7 +366,9 @@ fn replay_protection() {
     let mut router = MessageRouter::new(policy.clone(), MonitorThresholds::default());
 
     let agent = AgentKeypair::generate("replayer").unwrap();
-    router.pep.register_identity(agent.identity.clone());
+    let recipient = AgentKeypair::generate("recipient").unwrap();
+    register_agent(&mut router, &agent);
+    register_agent(&mut router, &recipient);
 
     let mut cap = CapabilityToken::root(
         agent.id(),
@@ -375,13 +379,14 @@ fn replay_protection() {
         resource: "tool://*".into(),
         actions: vec!["execute".into()],
     }];
+    cap.sign(&agent);
 
-    // First message with seq=1 succeeds
     let msg1 = AuthenticatedMessage::create(
         &agent,
-        Uuid::new_v4(),
+        recipient.id(),
         b"first".to_vec(),
         cap.clone(),
+        vec![],
         policy.clone(),
         1,
     )
@@ -389,12 +394,12 @@ fn replay_protection() {
     let r1 = router.route(&msg1, "tool://test", "execute").unwrap();
     assert!(r1.allowed);
 
-    // Replay with same seq=1 fails
     let msg2 = AuthenticatedMessage::create(
         &agent,
-        Uuid::new_v4(),
+        recipient.id(),
         b"replay".to_vec(),
         cap,
+        vec![],
         policy.clone(),
         1,
     )

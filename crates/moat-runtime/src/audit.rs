@@ -3,10 +3,17 @@
 //! Every PEP decision, sandbox action, and secret resolution is recorded.
 //! Each entry includes a hash of the previous entry, forming a chain where
 //! modifying any entry invalidates all subsequent entries.
+//!
+//! The log can optionally be backed by a file (one JSON line per entry).
+//! On load, the hash chain is verified. On append, the new entry is
+//! written and fsynced.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use moat_core::MoatError;
@@ -74,13 +81,83 @@ impl AuditEntry {
 /// The append-only audit log.
 pub struct AuditLog {
     entries: Vec<AuditEntry>,
+    /// Optional file path for persistence.
+    file_path: Option<PathBuf>,
 }
 
 impl AuditLog {
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
+            file_path: None,
         }
+    }
+
+    /// Create a persistent audit log. Loads existing entries from the file
+    /// (verifying the hash chain), and appends new entries to it.
+    pub fn with_persistence(path: PathBuf) -> Result<Self, MoatError> {
+        let entries = if path.exists() {
+            Self::load_from_file(&path)?
+        } else {
+            Vec::new()
+        };
+        Ok(Self {
+            entries,
+            file_path: Some(path),
+        })
+    }
+
+    /// Load entries from a JSONL file and verify the hash chain.
+    fn load_from_file(path: &Path) -> Result<Vec<AuditEntry>, MoatError> {
+        let file = File::open(path)
+            .map_err(|e| MoatError::Sandbox(format!("failed to open audit log: {}", e)))?;
+        let reader = BufReader::new(file);
+        let mut entries = Vec::new();
+
+        for (line_num, line) in reader.lines().enumerate() {
+            let line = line
+                .map_err(|e| MoatError::Sandbox(format!("failed to read audit log line: {}", e)))?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let entry: AuditEntry = serde_json::from_str(&line).map_err(|e| {
+                MoatError::Sandbox(format!(
+                    "failed to parse audit log line {}: {}",
+                    line_num + 1,
+                    e
+                ))
+            })?;
+            entries.push(entry);
+        }
+
+        // Verify integrity after loading
+        let log = AuditLog {
+            entries,
+            file_path: None,
+        };
+        log.verify_integrity()?;
+        Ok(log.entries)
+    }
+
+    /// Append a single entry to the file.
+    fn persist_entry(&self, entry: &AuditEntry) -> Result<(), MoatError> {
+        if let Some(ref path) = self.file_path {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .map_err(|e| {
+                    MoatError::Sandbox(format!("failed to open audit log for append: {}", e))
+                })?;
+            let json = serde_json::to_string(entry)?;
+            writeln!(file, "{}", json).map_err(|e| {
+                MoatError::Sandbox(format!("failed to write audit entry: {}", e))
+            })?;
+            file.sync_all().map_err(|e| {
+                MoatError::Sandbox(format!("failed to fsync audit log: {}", e))
+            })?;
+        }
+        Ok(())
     }
 
     /// Append an event to the log, extending the hash chain.
@@ -94,14 +171,20 @@ impl AuditLog {
         let timestamp = Utc::now();
         let entry_hash = AuditEntry::compute_hash(index, &timestamp, &event, &previous_hash);
 
-        self.entries.push(AuditEntry {
+        let entry = AuditEntry {
             index,
             timestamp,
             event,
             previous_hash,
             entry_hash,
-        });
+        };
 
+        // Persist before adding to in-memory log
+        if let Err(e) = self.persist_entry(&entry) {
+            tracing::error!(error = %e, "failed to persist audit entry");
+        }
+
+        self.entries.push(entry);
         self.entries.last().expect("just pushed")
     }
 
@@ -275,5 +358,95 @@ mod tests {
 
         assert_eq!(log.entries_for_agent(agent_a).len(), 2);
         assert_eq!(log.entries_for_agent(agent_b).len(), 1);
+    }
+
+    #[test]
+    fn persistent_audit_log_survives_reload() {
+        let dir = std::env::temp_dir().join(format!("moat-audit-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log_path = dir.join("audit.jsonl");
+
+        let agent = Uuid::new_v4();
+
+        // Write some entries
+        {
+            let mut log = AuditLog::with_persistence(log_path.clone()).unwrap();
+            log.append(AuditEventKind::SandboxAction {
+                agent_id: agent,
+                action: "read".into(),
+                resource: "file_a".into(),
+            });
+            log.append(AuditEventKind::SandboxAction {
+                agent_id: agent,
+                action: "write".into(),
+                resource: "file_b".into(),
+            });
+            assert_eq!(log.len(), 2);
+        }
+
+        // Reload and verify
+        {
+            let mut log = AuditLog::with_persistence(log_path.clone()).unwrap();
+            assert_eq!(log.len(), 2);
+            assert!(log.verify_integrity().is_ok());
+
+            // Append more
+            log.append(AuditEventKind::SandboxAction {
+                agent_id: agent,
+                action: "execute".into(),
+                resource: "tool_c".into(),
+            });
+            assert_eq!(log.len(), 3);
+        }
+
+        // Reload again and verify the full chain
+        {
+            let log = AuditLog::with_persistence(log_path.clone()).unwrap();
+            assert_eq!(log.len(), 3);
+            assert!(log.verify_integrity().is_ok());
+            assert_eq!(log.entries_for_agent(agent).len(), 3);
+        }
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tampered_file_detected_on_load() {
+        let dir = std::env::temp_dir().join(format!("moat-audit-tamper-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log_path = dir.join("audit.jsonl");
+
+        // Write entries
+        {
+            let mut log = AuditLog::with_persistence(log_path.clone()).unwrap();
+            log.append(AuditEventKind::SandboxAction {
+                agent_id: Uuid::new_v4(),
+                action: "read".into(),
+                resource: "file_a".into(),
+            });
+            log.append(AuditEventKind::SandboxAction {
+                agent_id: Uuid::new_v4(),
+                action: "write".into(),
+                resource: "file_b".into(),
+            });
+        }
+
+        // Tamper with the file: modify the first line
+        {
+            let content = std::fs::read_to_string(&log_path).unwrap();
+            let mut lines: Vec<&str> = content.lines().collect();
+            // Replace the first character of the first line's hash
+            let first = lines[0].to_string();
+            let tampered = first.replacen("\"entry_hash\":[", "\"entry_hash\":[0,", 1);
+            lines[0] = &tampered;
+            std::fs::write(&log_path, lines.join("\n") + "\n").unwrap();
+        }
+
+        // Loading should detect tampering
+        let result = AuditLog::with_persistence(log_path);
+        assert!(result.is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

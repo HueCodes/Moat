@@ -3,6 +3,9 @@
 //! Every inter-agent invocation is wrapped in an `AuthenticatedMessage` that
 //! cryptographically binds the sender, payload, capability token, and policy
 //! binding. Sequence numbers provide replay protection per-sender.
+//!
+//! The message signature covers a deterministic binary canonical form (not JSON),
+//! so it is immune to serialization ordering changes.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -43,25 +46,16 @@ pub struct AuthenticatedMessage {
     pub recipient_id: Uuid,
     pub payload: Vec<u8>,
     pub capability_token: CapabilityToken,
+    /// The delegation chain from root to the immediate parent of `capability_token`.
+    /// Empty if `capability_token` is itself a root token.
+    #[serde(default)]
+    pub token_chain: Vec<CapabilityToken>,
     pub policy_binding: PolicyBinding,
     /// Monotonically increasing per-sender. Used for replay detection.
     pub sequence_number: u64,
     pub timestamp: DateTime<Utc>,
     /// Ed25519 signature over the canonical message bytes (everything except this field).
     pub signature: Vec<u8>,
-}
-
-/// The signable portion of a message (everything except the signature itself).
-#[derive(Serialize)]
-struct SignableMessage<'a> {
-    message_id: Uuid,
-    sender_id: Uuid,
-    recipient_id: Uuid,
-    payload: &'a [u8],
-    capability_token: &'a CapabilityToken,
-    policy_binding: &'a PolicyBinding,
-    sequence_number: u64,
-    timestamp: DateTime<Utc>,
 }
 
 impl AuthenticatedMessage {
@@ -71,24 +65,24 @@ impl AuthenticatedMessage {
         recipient_id: Uuid,
         payload: Vec<u8>,
         capability_token: CapabilityToken,
+        token_chain: Vec<CapabilityToken>,
         policy_binding: PolicyBinding,
         sequence_number: u64,
     ) -> Result<Self, MoatError> {
         let message_id = Uuid::new_v4();
         let timestamp = Utc::now();
 
-        let signable = SignableMessage {
+        let canonical = canonical_message_bytes(
             message_id,
-            sender_id: sender.id(),
+            sender.id(),
             recipient_id,
-            payload: &payload,
-            capability_token: &capability_token,
-            policy_binding: &policy_binding,
+            &payload,
+            &capability_token,
+            &token_chain,
+            &policy_binding,
             sequence_number,
             timestamp,
-        };
-
-        let canonical = serde_json::to_vec(&signable)?;
+        );
         let signature = sender.sign(&canonical);
 
         Ok(Self {
@@ -97,6 +91,7 @@ impl AuthenticatedMessage {
             recipient_id,
             payload,
             capability_token,
+            token_chain,
             policy_binding,
             sequence_number,
             timestamp,
@@ -107,18 +102,17 @@ impl AuthenticatedMessage {
     /// Verify the message signature against the sender's public identity.
     /// This is stage 1 of the PEP three-stage pipeline.
     pub fn verify_signature(&self, sender_identity: &AgentIdentity) -> Result<(), MoatError> {
-        let signable = SignableMessage {
-            message_id: self.message_id,
-            sender_id: self.sender_id,
-            recipient_id: self.recipient_id,
-            payload: &self.payload,
-            capability_token: &self.capability_token,
-            policy_binding: &self.policy_binding,
-            sequence_number: self.sequence_number,
-            timestamp: self.timestamp,
-        };
-
-        let canonical = serde_json::to_vec(&signable)?;
+        let canonical = canonical_message_bytes(
+            self.message_id,
+            self.sender_id,
+            self.recipient_id,
+            &self.payload,
+            &self.capability_token,
+            &self.token_chain,
+            &self.policy_binding,
+            self.sequence_number,
+            self.timestamp,
+        );
         sender_identity.verify(&canonical, &self.signature)
     }
 
@@ -149,6 +143,48 @@ impl AuthenticatedMessage {
     }
 }
 
+/// Deterministic canonical bytes for message signing.
+/// Uses fixed-size binary fields concatenated directly; payload is hashed.
+fn canonical_message_bytes(
+    message_id: Uuid,
+    sender_id: Uuid,
+    recipient_id: Uuid,
+    payload: &[u8],
+    capability_token: &CapabilityToken,
+    token_chain: &[CapabilityToken],
+    policy_binding: &PolicyBinding,
+    sequence_number: u64,
+    timestamp: DateTime<Utc>,
+) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(256);
+    buf.extend_from_slice(message_id.as_bytes());
+    buf.extend_from_slice(sender_id.as_bytes());
+    buf.extend_from_slice(recipient_id.as_bytes());
+    buf.extend_from_slice(&sha256_hash(payload));
+    buf.extend_from_slice(capability_token.token_id.as_bytes());
+    buf.extend_from_slice(&policy_binding.policy_hash);
+    buf.extend_from_slice(policy_binding.policy_id.as_bytes());
+    buf.extend_from_slice(&sequence_number.to_le_bytes());
+    buf.extend_from_slice(&timestamp.timestamp().to_le_bytes());
+    buf.extend_from_slice(&timestamp.timestamp_subsec_nanos().to_le_bytes());
+    // Bind the token chain so it can't be swapped
+    buf.extend_from_slice(&(token_chain.len() as u64).to_le_bytes());
+    for token in token_chain {
+        buf.extend_from_slice(token.token_id.as_bytes());
+    }
+    buf
+}
+
+/// SHA-256 hash of raw bytes.
+fn sha256_hash(data: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    let result = hasher.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&result);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +205,7 @@ mod tests {
             actions: vec!["execute".into()],
         }];
         cap.resource_limits = ResourceLimits::default();
+        cap.sign(&sender);
 
         let policy = PolicyBinding::new("test-policy-v1", b"test policy document");
         (sender, recipient, cap, policy)
@@ -182,6 +219,7 @@ mod tests {
             recipient.id(),
             b"hello".to_vec(),
             cap,
+            vec![],
             policy.clone(),
             1,
         )
@@ -200,6 +238,7 @@ mod tests {
             recipient.id(),
             b"hello".to_vec(),
             cap,
+            vec![],
             policy,
             1,
         )
@@ -217,6 +256,7 @@ mod tests {
             recipient.id(),
             b"hello".to_vec(),
             cap,
+            vec![],
             policy,
             1,
         )
@@ -234,6 +274,7 @@ mod tests {
             recipient.id(),
             b"hello".to_vec(),
             cap,
+            vec![],
             policy,
             5,
         )

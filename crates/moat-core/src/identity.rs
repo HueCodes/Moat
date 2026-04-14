@@ -81,6 +81,20 @@ impl AgentKeypair {
     pub fn verifying_key(&self) -> VerifyingKey {
         self.signing_key.verifying_key()
     }
+
+    /// Reconstruct an `AgentKeypair` from a saved identity and signing key.
+    pub fn from_parts(identity: AgentIdentity, signing_key: SigningKey) -> Self {
+        Self {
+            identity,
+            signing_key,
+        }
+    }
+
+    /// Return the raw signing key bytes (32 bytes) for serialization.
+    /// Keep these secret.
+    pub fn signing_key_bytes(&self) -> [u8; 32] {
+        self.signing_key.to_bytes()
+    }
 }
 
 impl AgentIdentity {

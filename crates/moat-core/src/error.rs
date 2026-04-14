@@ -32,6 +32,15 @@ pub enum MoatError {
     #[error("capability chain depth {depth} exceeds maximum {max}")]
     DelegationDepthExceeded { depth: u32, max: u32 },
 
+    #[error("capability token signature invalid or missing")]
+    TokenSignatureInvalid,
+
+    #[error("untrusted token root: issuer {0} is not a trusted root")]
+    UntrustedTokenRoot(Uuid),
+
+    #[error("token chain invalid: {0}")]
+    TokenChainInvalid(String),
+
     // --- Policy ---
     #[error("policy binding verification failed: expected {expected}, got {actual}")]
     PolicyBindingMismatch { expected: String, actual: String },
