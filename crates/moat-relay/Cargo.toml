@@ -1,0 +1,22 @@
+[package]
+name = "moat-relay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Moat relay: agent registry, message routing, discovery"
+
+[dependencies]
+moat-core = { workspace = true }
+moat-runtime = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+ed25519-dalek = { workspace = true }
+rand = { workspace = true }

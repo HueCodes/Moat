@@ -1,0 +1,15 @@
+[package]
+name = "moat-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Moat CLI tool"
+
+[dependencies]
+moat-core = { workspace = true }
+moat-runtime = { workspace = true }
+moat-relay = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde_json = { workspace = true }

@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/moat-core",
+    "crates/moat-runtime",
+    "crates/moat-relay",
+    "crates/moat-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+# Crypto
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+sha2 = "0.10"
+rand = "0.8"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "2"
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Sandbox
+wasmtime = "29"
+wasmtime-wasi = "29"
+cap-std = "3"
+wat = "1"
+
+# Workspace crates
+moat-core = { path = "crates/moat-core" }
+moat-runtime = { path = "crates/moat-runtime" }
+moat-relay = { path = "crates/moat-relay" }

@@ -1,0 +1,20 @@
+[package]
+name = "moat-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core types for the Moat agent sandbox protocol: identity, capabilities, policy, messages, errors"
+
+[dependencies]
+ed25519-dalek = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
