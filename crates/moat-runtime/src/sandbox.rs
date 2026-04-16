@@ -310,7 +310,11 @@ mod tests {
         let result = sandbox.execute(&wasm);
         assert!(result.is_err(), "should fail from fuel exhaustion");
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("fuel") || err.contains("execution"), "error should mention fuel: {}", err);
+        assert!(
+            err.contains("fuel") || err.contains("execution"),
+            "error should mention fuel: {}",
+            err
+        );
     }
 
     #[test]

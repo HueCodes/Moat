@@ -5,12 +5,20 @@ members = [
     "crates/moat-runtime",
     "crates/moat-relay",
     "crates/moat-cli",
+    "examples/ping_pong",
+    "examples/delegated_task",
+    "examples/secret_injection",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
+repository = "https://github.com/moat-protocol/moat"
+homepage = "https://github.com/moat-protocol/moat"
+authors = ["Moat Protocol Contributors"]
+categories = ["authentication", "cryptography", "wasm"]
+keywords = ["agent", "sandbox", "capability", "security", "wasm"]
 
 [workspace.dependencies]
 # Crypto

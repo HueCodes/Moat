@@ -33,11 +33,8 @@ fn two_agents_communicate_through_pep() {
     register_agent(&mut router, &agent_b);
 
     // Agent A creates a capability token granting tool access
-    let mut cap_a = CapabilityToken::root(
-        agent_a.id(),
-        agent_a.id(),
-        Utc::now() + Duration::hours(1),
-    );
+    let mut cap_a =
+        CapabilityToken::root(agent_a.id(), agent_a.id(), Utc::now() + Duration::hours(1));
     cap_a.allowed = vec![ScopeEntry {
         resource: "tool://*".into(),
         actions: vec!["execute".into(), "read".into()],
@@ -67,11 +64,8 @@ fn two_agents_communicate_through_pep() {
     assert!(result.allowed, "valid message should be allowed");
 
     // Agent B responds
-    let mut cap_b = CapabilityToken::root(
-        agent_b.id(),
-        agent_b.id(),
-        Utc::now() + Duration::hours(1),
-    );
+    let mut cap_b =
+        CapabilityToken::root(agent_b.id(), agent_b.id(), Utc::now() + Duration::hours(1));
     cap_b.allowed = vec![ScopeEntry {
         resource: "tool://*".into(),
         actions: vec!["execute".into()],
@@ -120,11 +114,8 @@ fn invalid_signature_rejected() {
     register_agent(&mut router, &agent_a);
     register_agent(&mut router, &agent_b);
 
-    let mut cap = CapabilityToken::root(
-        agent_a.id(),
-        agent_a.id(),
-        Utc::now() + Duration::hours(1),
-    );
+    let mut cap =
+        CapabilityToken::root(agent_a.id(), agent_a.id(), Utc::now() + Duration::hours(1));
     cap.allowed = vec![ScopeEntry {
         resource: "tool://*".into(),
         actions: vec!["execute".into()],
@@ -168,11 +159,8 @@ fn capability_attenuation_enforced() {
     register_agent(&mut router, &worker);
 
     // Manager has broad tool access
-    let mut manager_cap = CapabilityToken::root(
-        manager.id(),
-        manager.id(),
-        Utc::now() + Duration::hours(1),
-    );
+    let mut manager_cap =
+        CapabilityToken::root(manager.id(), manager.id(), Utc::now() + Duration::hours(1));
     manager_cap.allowed = vec![ScopeEntry {
         resource: "tool://*".into(),
         actions: vec!["execute".into(), "read".into(), "write".into()],
@@ -216,9 +204,7 @@ fn capability_attenuation_enforced() {
         1,
     )
     .unwrap();
-    let result = router
-        .route(&msg_ok, "tool://code_review", "read")
-        .unwrap();
+    let result = router.route(&msg_ok, "tool://code_review", "read").unwrap();
     assert!(result.allowed, "worker should be able to read code_review");
 
     // Worker cannot execute (not in attenuated scope)
@@ -251,9 +237,7 @@ fn capability_attenuation_enforced() {
         3,
     )
     .unwrap();
-    let result = router
-        .route(&msg_deny2, "tool://deploy", "read")
-        .unwrap();
+    let result = router.route(&msg_deny2, "tool://deploy", "read").unwrap();
     assert!(
         !result.allowed,
         "worker should not access tools outside scope"
@@ -321,11 +305,7 @@ fn monitor_alerts_on_excessive_actions() {
     register_agent(&mut router, &agent);
     register_agent(&mut router, &recipient);
 
-    let mut cap = CapabilityToken::root(
-        agent.id(),
-        agent.id(),
-        Utc::now() + Duration::hours(1),
-    );
+    let mut cap = CapabilityToken::root(agent.id(), agent.id(), Utc::now() + Duration::hours(1));
     cap.allowed = vec![ScopeEntry {
         resource: "tool://*".into(),
         actions: vec!["execute".into()],
@@ -370,11 +350,7 @@ fn replay_protection() {
     register_agent(&mut router, &agent);
     register_agent(&mut router, &recipient);
 
-    let mut cap = CapabilityToken::root(
-        agent.id(),
-        agent.id(),
-        Utc::now() + Duration::hours(1),
-    );
+    let mut cap = CapabilityToken::root(agent.id(), agent.id(), Utc::now() + Duration::hours(1));
     cap.allowed = vec![ScopeEntry {
         resource: "tool://*".into(),
         actions: vec!["execute".into()],

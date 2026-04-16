@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::{Duration, Utc};
 use clap::{Parser, Subcommand};
@@ -172,14 +172,19 @@ fn parse_scope(scope_strs: &[String]) -> Vec<ScopeEntry> {
         .iter()
         .filter_map(|s| {
             if let Some((resource, actions_str)) = s.rsplit_once('=') {
-                let actions: Vec<String> =
-                    actions_str.split(',').map(|a| a.trim().to_string()).collect();
+                let actions: Vec<String> = actions_str
+                    .split(',')
+                    .map(|a| a.trim().to_string())
+                    .collect();
                 Some(ScopeEntry {
                     resource: resource.to_string(),
                     actions,
                 })
             } else {
-                eprintln!("warning: ignoring malformed scope entry (expected resource=action,...): {}", s);
+                eprintln!(
+                    "warning: ignoring malformed scope entry (expected resource=action,...): {}",
+                    s
+                );
                 None
             }
         })
@@ -248,10 +253,7 @@ fn main() {
     }
 }
 
-fn cmd_identity_generate(
-    name: &str,
-    output: &PathBuf,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_identity_generate(name: &str, output: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let kp = AgentKeypair::generate(name)?;
     println!("generated identity: {}", kp.id());
     println!("name: {}", name);
@@ -369,8 +371,8 @@ fn cmd_token_verify(
     }
 }
 
-fn cmd_audit_verify(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let log = AuditLog::with_persistence(path.clone())?;
+fn cmd_audit_verify(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let log = AuditLog::with_persistence(path.to_path_buf())?;
     match log.verify_integrity() {
         Ok(()) => {
             println!("audit log integrity verified");

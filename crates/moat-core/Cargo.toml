@@ -3,6 +3,11 @@ name = "moat-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories.workspace = true
+keywords.workspace = true
 description = "Core types for the Moat agent sandbox protocol: identity, capabilities, policy, messages, errors"
 
 [dependencies]

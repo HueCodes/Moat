@@ -226,11 +226,7 @@ impl RuntimeMonitor {
     }
 
     /// Transition an agent's FSM state. Returns alerts for invalid transitions.
-    pub fn transition_state(
-        &mut self,
-        agent_id: Uuid,
-        new_state: AgentState,
-    ) -> Vec<MonitorAlert> {
+    pub fn transition_state(&mut self, agent_id: Uuid, new_state: AgentState) -> Vec<MonitorAlert> {
         let now = Utc::now();
         let tracking = self.tracking.entry(agent_id).or_default();
         let old_state = tracking.state;
@@ -519,11 +515,7 @@ impl RuntimeMonitor {
 
     /// Take a serializable snapshot of monitor state.
     pub fn snapshot(&self) -> MonitorSnapshot {
-        let agent_states = self
-            .tracking
-            .iter()
-            .map(|(id, t)| (*id, t.state))
-            .collect();
+        let agent_states = self.tracking.iter().map(|(id, t)| (*id, t.state)).collect();
         let agent_action_counts = self
             .metrics
             .iter()

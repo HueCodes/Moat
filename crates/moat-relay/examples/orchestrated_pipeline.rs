@@ -95,7 +95,10 @@ fn main() {
         )
         .unwrap();
     reviewer_token.sign(&coordinator);
-    println!("Reviewer token:  {} (depth {})", reviewer_token.token_id, reviewer_token.delegation_depth);
+    println!(
+        "Reviewer token:  {} (depth {})",
+        reviewer_token.token_id, reviewer_token.delegation_depth
+    );
 
     // Tester: execute-only on test tool
     let mut tester_token = coord_token
@@ -115,7 +118,10 @@ fn main() {
         )
         .unwrap();
     tester_token.sign(&coordinator);
-    println!("Tester token:    {} (depth {})", tester_token.token_id, tester_token.delegation_depth);
+    println!(
+        "Tester token:    {} (depth {})",
+        tester_token.token_id, tester_token.delegation_depth
+    );
 
     // Deployer: execute-only on deploy tool
     let mut deployer_token = coord_token
@@ -135,7 +141,10 @@ fn main() {
         )
         .unwrap();
     deployer_token.sign(&coordinator);
-    println!("Deployer token:  {} (depth {})", deployer_token.token_id, deployer_token.delegation_depth);
+    println!(
+        "Deployer token:  {} (depth {})",
+        deployer_token.token_id, deployer_token.delegation_depth
+    );
 
     // --- Execute the pipeline ---
     println!("\n--- Pipeline execution ---\n");
@@ -173,9 +182,7 @@ fn main() {
     )
     .unwrap();
 
-    let result = router
-        .route(&test_msg, "tool://test", "execute")
-        .unwrap();
+    let result = router.route(&test_msg, "tool://test", "execute").unwrap();
     println!(
         "Step 2 - Tester executes tests:      {}",
         if result.allowed { "ALLOWED" } else { "DENIED" }
@@ -278,38 +285,36 @@ fn main() {
     );
 
     for entry in router.audit_log.entries() {
-        match &entry.event {
-            moat_runtime::AuditEventKind::PepDecision {
-                sender_id,
-                resource,
+        if let moat_runtime::AuditEventKind::PepDecision {
+            sender_id,
+            resource,
+            action,
+            allowed,
+            reason,
+            ..
+        } = &entry.event
+        {
+            let agent_name = if *sender_id == reviewer.id() {
+                "reviewer"
+            } else if *sender_id == tester.id() {
+                "tester"
+            } else if *sender_id == deployer.id() {
+                "deployer"
+            } else {
+                "unknown"
+            };
+            println!(
+                "  [{}] {} {} on {} {}",
+                entry.index,
+                agent_name,
                 action,
-                allowed,
-                reason,
-                ..
-            } => {
-                let agent_name = if *sender_id == reviewer.id() {
-                    "reviewer"
-                } else if *sender_id == tester.id() {
-                    "tester"
-                } else if *sender_id == deployer.id() {
-                    "deployer"
+                resource,
+                if *allowed {
+                    "-> ALLOWED".to_string()
                 } else {
-                    "unknown"
-                };
-                println!(
-                    "  [{}] {} {} on {} {}",
-                    entry.index,
-                    agent_name,
-                    action,
-                    resource,
-                    if *allowed {
-                        "-> ALLOWED".to_string()
-                    } else {
-                        format!("-> DENIED ({})", reason.as_deref().unwrap_or("unknown"))
-                    }
-                );
-            }
-            _ => {}
+                    format!("-> DENIED ({})", reason.as_deref().unwrap_or("unknown"))
+                }
+            );
         }
     }
 

@@ -150,12 +150,10 @@ impl AuditLog {
                     MoatError::Sandbox(format!("failed to open audit log for append: {}", e))
                 })?;
             let json = serde_json::to_string(entry)?;
-            writeln!(file, "{}", json).map_err(|e| {
-                MoatError::Sandbox(format!("failed to write audit entry: {}", e))
-            })?;
-            file.sync_all().map_err(|e| {
-                MoatError::Sandbox(format!("failed to fsync audit log: {}", e))
-            })?;
+            writeln!(file, "{}", json)
+                .map_err(|e| MoatError::Sandbox(format!("failed to write audit entry: {}", e)))?;
+            file.sync_all()
+                .map_err(|e| MoatError::Sandbox(format!("failed to fsync audit log: {}", e)))?;
         }
         Ok(())
     }
@@ -233,15 +231,9 @@ impl AuditLog {
             .iter()
             .filter(|e| match &e.event {
                 AuditEventKind::PepDecision { sender_id, .. } => *sender_id == agent_id,
-                AuditEventKind::SandboxAction {
-                    agent_id: aid, ..
-                } => *aid == agent_id,
-                AuditEventKind::SecretResolution {
-                    agent_id: aid, ..
-                } => *aid == agent_id,
-                AuditEventKind::MonitorAlert {
-                    agent_id: aid, ..
-                } => *aid == agent_id,
+                AuditEventKind::SandboxAction { agent_id: aid, .. } => *aid == agent_id,
+                AuditEventKind::SecretResolution { agent_id: aid, .. } => *aid == agent_id,
+                AuditEventKind::MonitorAlert { agent_id: aid, .. } => *aid == agent_id,
             })
             .collect()
     }

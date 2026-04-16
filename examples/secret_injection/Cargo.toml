@@ -1,0 +1,9 @@
+[package]
+name = "secret-injection"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+moat-core = { path = "../../crates/moat-core" }
+moat-runtime = { path = "../../crates/moat-runtime" }

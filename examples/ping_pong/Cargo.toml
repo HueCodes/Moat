@@ -1,0 +1,11 @@
+[package]
+name = "ping-pong"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+moat-core = { path = "../../crates/moat-core" }
+moat-runtime = { path = "../../crates/moat-runtime" }
+moat-relay = { path = "../../crates/moat-relay" }
+chrono = { version = "0.4", features = ["serde"] }

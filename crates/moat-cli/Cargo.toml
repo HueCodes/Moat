@@ -3,7 +3,10 @@ name = "moat-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Moat CLI tool"
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Command-line interface for the Moat agent sandbox protocol"
 
 [dependencies]
 moat-core = { workspace = true }

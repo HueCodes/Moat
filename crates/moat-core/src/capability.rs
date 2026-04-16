@@ -375,7 +375,9 @@ mod tests {
     #[test]
     fn action_denied_not_in_scope() {
         let (_kp, token) = root_token();
-        assert!(token.is_action_allowed("file:///etc/passwd", "read").is_err());
+        assert!(token
+            .is_action_allowed("file:///etc/passwd", "read")
+            .is_err());
     }
 
     #[test]
@@ -418,9 +420,7 @@ mod tests {
         child.sign(&kp);
 
         assert!(child.is_action_allowed("tool://review", "execute").is_ok());
-        assert!(child
-            .is_action_allowed("tool://deploy", "execute")
-            .is_err());
+        assert!(child.is_action_allowed("tool://deploy", "execute").is_err());
     }
 
     #[test]

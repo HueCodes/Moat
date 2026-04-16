@@ -3,6 +3,11 @@ name = "moat-relay"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories.workspace = true
+keywords.workspace = true
 description = "Moat relay: agent registry, message routing, discovery"
 
 [dependencies]

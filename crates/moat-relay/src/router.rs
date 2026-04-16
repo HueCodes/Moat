@@ -173,10 +173,7 @@ impl MessageRouter {
 
         // Pre-PEP checks: rate limiting
         if let Some(rate_max) = self.limits.rate_limit_max {
-            let tracker = self
-                .rate_trackers
-                .entry(message.sender_id)
-                .or_default();
+            let tracker = self.rate_trackers.entry(message.sender_id).or_default();
             if !tracker.record(Utc::now(), self.limits.rate_limit_window, rate_max) {
                 let reason = format!(
                     "rate limit exceeded: {} messages in {}s window",
@@ -277,10 +274,7 @@ mod tests {
         let sender = AgentKeypair::generate("sender").unwrap();
         let recipient = AgentKeypair::generate("recipient").unwrap();
 
-        router
-            .registry
-            .register(sender.identity.clone())
-            .unwrap();
+        router.registry.register(sender.identity.clone()).unwrap();
         router
             .registry
             .register(recipient.identity.clone())
@@ -299,11 +293,8 @@ mod tests {
         policy: &PolicyBinding,
         seq: u64,
     ) -> AuthenticatedMessage {
-        let mut cap = CapabilityToken::root(
-            sender.id(),
-            sender.id(),
-            Utc::now() + Duration::hours(1),
-        );
+        let mut cap =
+            CapabilityToken::root(sender.id(), sender.id(), Utc::now() + Duration::hours(1));
         cap.allowed = vec![ScopeEntry {
             resource: "tool://*".into(),
             actions: vec!["execute".into()],
@@ -378,10 +369,7 @@ mod tests {
 
         let sender = AgentKeypair::generate("sender").unwrap();
         let recipient = AgentKeypair::generate("recipient").unwrap();
-        router
-            .registry
-            .register(sender.identity.clone())
-            .unwrap();
+        router.registry.register(sender.identity.clone()).unwrap();
         router
             .registry
             .register(recipient.identity.clone())
@@ -390,11 +378,8 @@ mod tests {
         router.pep.add_trusted_root(sender.id());
 
         // Build a message with oversized payload
-        let mut cap = CapabilityToken::root(
-            sender.id(),
-            sender.id(),
-            Utc::now() + Duration::hours(1),
-        );
+        let mut cap =
+            CapabilityToken::root(sender.id(), sender.id(), Utc::now() + Duration::hours(1));
         cap.allowed = vec![ScopeEntry {
             resource: "tool://*".into(),
             actions: vec!["execute".into()],
@@ -434,10 +419,7 @@ mod tests {
 
         let sender = AgentKeypair::generate("sender").unwrap();
         let recipient = AgentKeypair::generate("recipient").unwrap();
-        router
-            .registry
-            .register(sender.identity.clone())
-            .unwrap();
+        router.registry.register(sender.identity.clone()).unwrap();
         router
             .registry
             .register(recipient.identity.clone())

@@ -155,10 +155,7 @@ mod tests {
         let proxy = SecretProxy::new();
         let handle = SecretHandle::new("nonexistent");
         let result = proxy.resolve_for_header(&handle, Uuid::new_v4(), "X-Key");
-        assert!(matches!(
-            result,
-            Err(MoatError::SecretHandleNotFound(_))
-        ));
+        assert!(matches!(result, Err(MoatError::SecretHandleNotFound(_))));
     }
 
     #[test]

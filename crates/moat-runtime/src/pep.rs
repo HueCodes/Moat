@@ -191,9 +191,7 @@ impl PolicyEnforcementPoint {
         }
 
         // Stage 3: Capability token chain verification + action check
-        if let Err(e) =
-            self.verify_token_chain(&message.capability_token, &message.token_chain)
-        {
+        if let Err(e) = self.verify_token_chain(&message.capability_token, &message.token_chain) {
             return PepDecision {
                 message_id: message.message_id,
                 sender_id: message.sender_id,
@@ -339,11 +337,8 @@ mod tests {
         policy: &PolicyBinding,
         seq: u64,
     ) -> AuthenticatedMessage {
-        let mut cap = CapabilityToken::root(
-            sender.id(),
-            sender.id(),
-            Utc::now() + Duration::hours(1),
-        );
+        let mut cap =
+            CapabilityToken::root(sender.id(), sender.id(), Utc::now() + Duration::hours(1));
         cap.allowed = vec![ScopeEntry {
             resource: "tool://*".into(),
             actions: vec!["execute".into()],
@@ -443,11 +438,8 @@ mod tests {
     fn delegated_token_chain_verified() {
         let (sender, recipient, policy, mut pep) = setup();
 
-        let mut root_cap = CapabilityToken::root(
-            sender.id(),
-            sender.id(),
-            Utc::now() + Duration::hours(1),
-        );
+        let mut root_cap =
+            CapabilityToken::root(sender.id(), sender.id(), Utc::now() + Duration::hours(1));
         root_cap.allowed = vec![ScopeEntry {
             resource: "tool://*".into(),
             actions: vec!["execute".into()],
@@ -495,11 +487,8 @@ mod tests {
         let attacker = AgentKeypair::generate("attacker").unwrap();
         pep.register_identity(attacker.identity.clone());
 
-        let mut forged_cap = CapabilityToken::root(
-            sender.id(),
-            attacker.id(),
-            Utc::now() + Duration::hours(1),
-        );
+        let mut forged_cap =
+            CapabilityToken::root(sender.id(), attacker.id(), Utc::now() + Duration::hours(1));
         forged_cap.allowed = vec![ScopeEntry {
             resource: "tool://*".into(),
             actions: vec!["*".into()],

@@ -118,10 +118,7 @@ impl AuthenticatedMessage {
 
     /// Verify the policy binding matches the expected policy.
     /// This is stage 2 of the PEP three-stage pipeline.
-    pub fn verify_policy_binding(
-        &self,
-        expected_binding: &PolicyBinding,
-    ) -> Result<(), MoatError> {
+    pub fn verify_policy_binding(&self, expected_binding: &PolicyBinding) -> Result<(), MoatError> {
         if self.policy_binding != *expected_binding {
             return Err(MoatError::PolicyBindingMismatch {
                 expected: expected_binding.policy_id.clone(),
@@ -145,6 +142,7 @@ impl AuthenticatedMessage {
 
 /// Deterministic canonical bytes for message signing.
 /// Uses fixed-size binary fields concatenated directly; payload is hashed.
+#[allow(clippy::too_many_arguments)] // Canonical serialization needs all message fields; a wrapper struct would add indirection without benefit.
 fn canonical_message_bytes(
     message_id: Uuid,
     sender_id: Uuid,
@@ -195,11 +193,8 @@ mod tests {
     fn test_setup() -> (AgentKeypair, AgentKeypair, CapabilityToken, PolicyBinding) {
         let sender = AgentKeypair::generate("sender").unwrap();
         let recipient = AgentKeypair::generate("recipient").unwrap();
-        let mut cap = CapabilityToken::root(
-            sender.id(),
-            sender.id(),
-            Utc::now() + Duration::hours(1),
-        );
+        let mut cap =
+            CapabilityToken::root(sender.id(), sender.id(), Utc::now() + Duration::hours(1));
         cap.allowed = vec![ScopeEntry {
             resource: "tool://*".into(),
             actions: vec!["execute".into()],
