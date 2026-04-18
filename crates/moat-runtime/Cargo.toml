@@ -8,7 +8,7 @@ homepage.workspace = true
 authors.workspace = true
 categories.workspace = true
 keywords.workspace = true
-description = "Moat sandbox runtime: PEP, sandbox execution, secret proxy, monitor, audit log"
+description = "Moat runtime — Policy Enforcement Point, Wasmtime sandbox, tamper-evident audit log, runtime monitor, and secret proxy for sandboxed agent-to-agent communication."
 
 [dependencies]
 moat-core = { workspace = true }

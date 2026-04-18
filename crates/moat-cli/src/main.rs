@@ -1,107 +1,133 @@
+//! Moat CLI.
+//!
+//! Subcommands:
+//! - `moat identity generate|show` — manage agent keypairs
+//! - `moat token create|attenuate|verify` — issue and verify capability tokens
+//! - `moat audit verify` — verify the SHA-256 hash chain of an audit log
+//! - `moat demo` — run a scripted multi-agent delegation scenario
+
+mod demo;
+mod style;
+
 use std::path::{Path, PathBuf};
 
 use chrono::{Duration, Utc};
 use clap::{Parser, Subcommand};
 use moat_core::{AgentIdentity, AgentKeypair, CapabilityToken, ResourceLimits, ScopeEntry};
 use moat_runtime::AuditLog;
+use serde::Serialize;
+
+use crate::style::{bold, check, cross, cyan, dim, red};
 
 #[derive(Parser)]
-#[command(name = "moat", about = "Moat protocol CLI", version)]
+#[command(
+    name = "moat",
+    about = "Moat — the missing security layer for AI agents.",
+    long_about = "Moat CLI. Generate identities, issue and attenuate capability tokens, \
+                  verify audit logs, and run a scripted multi-agent demo.",
+    version
+)]
 struct Cli {
+    /// Emit structured JSON output instead of human-readable text.
+    #[arg(long, global = true)]
+    json: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Manage agent identities
+    /// Manage agent identities (Ed25519 keypairs).
     Identity {
         #[command(subcommand)]
         action: IdentityAction,
     },
-    /// Manage capability tokens
+    /// Manage capability tokens (create, attenuate, verify).
     Token {
         #[command(subcommand)]
         action: TokenAction,
     },
-    /// Audit log operations
+    /// Audit log operations.
     Audit {
         #[command(subcommand)]
         action: AuditAction,
     },
+    /// Run a scripted multi-agent demo scenario (good for asciinema).
+    Demo,
 }
 
 #[derive(Subcommand)]
 enum IdentityAction {
-    /// Generate a new agent keypair
+    /// Generate a new agent keypair.
     Generate {
-        /// Human-readable name for the agent
+        /// Human-readable name for the agent.
         #[arg(long)]
         name: String,
-        /// Output path for the keypair file (JSON)
+        /// Output path for the keypair file (JSON).
         #[arg(long, default_value = "agent.key")]
         output: PathBuf,
     },
-    /// Display the public identity from a keypair file
+    /// Display the public identity from a keypair file.
     Show {
-        /// Path to the keypair file
+        /// Path to the keypair file.
         path: PathBuf,
     },
 }
 
 #[derive(Subcommand)]
 enum TokenAction {
-    /// Create and sign a root capability token
+    /// Create and sign a root capability token.
     Create {
-        /// Path to the issuer's keypair file
+        /// Path to the issuer's keypair file.
         #[arg(long)]
         issuer: PathBuf,
-        /// Subject agent ID (UUID)
+        /// Subject agent ID (UUID).
         #[arg(long)]
         subject: uuid::Uuid,
-        /// Scope entries as "resource=action,action" (repeatable)
+        /// Scope entries as `resource=action,action` (repeatable, semicolon-separated).
         #[arg(long, value_delimiter = ';')]
         scope: Vec<String>,
-        /// Token lifetime (e.g. "1h", "30m", "7d")
+        /// Token lifetime (e.g. `1h`, `30m`, `7d`).
         #[arg(long, default_value = "1h")]
         expires: String,
-        /// Maximum fuel
+        /// Maximum fuel (wasmtime units).
         #[arg(long)]
         max_fuel: Option<u64>,
-        /// Maximum memory in bytes
+        /// Maximum memory in bytes.
         #[arg(long)]
         max_memory: Option<u64>,
-        /// Output path for the token file (JSON)
+        /// Output path for the token file (JSON).
         #[arg(long, default_value = "token.json")]
         output: PathBuf,
     },
-    /// Attenuate (restrict) an existing token
+    /// Attenuate (restrict) an existing token.
     Attenuate {
-        /// Path to the parent token file
+        /// Path to the parent token file.
         #[arg(long)]
         parent: PathBuf,
-        /// Path to the delegator's keypair file (must match parent's subject)
+        /// Path to the delegator's keypair file (must match parent's subject).
         #[arg(long)]
         signer: PathBuf,
-        /// New subject agent ID (UUID)
+        /// New subject agent ID (UUID).
         #[arg(long)]
         subject: uuid::Uuid,
-        /// Narrowed scope entries as "resource=action,action" (repeatable)
+        /// Narrowed scope entries as `resource=action,action` (repeatable).
         #[arg(long, value_delimiter = ';')]
         scope: Vec<String>,
-        /// Maximum delegation depth
+        /// Maximum delegation depth.
         #[arg(long, default_value_t = 10)]
         max_depth: u32,
-        /// Output path
+        /// Output path.
         #[arg(long, default_value = "attenuated_token.json")]
         output: PathBuf,
     },
-    /// Verify a token's signature
+    /// Verify a token's signature.
     Verify {
-        /// Path to the token file
+        /// Path to the token file.
         #[arg(long)]
         token: PathBuf,
-        /// Path to the issuer's identity (public) or keypair file
+        /// Path to the issuer's identity (public) or keypair file.
         #[arg(long)]
         identity: PathBuf,
     },
@@ -109,15 +135,14 @@ enum TokenAction {
 
 #[derive(Subcommand)]
 enum AuditAction {
-    /// Verify the integrity of an audit log file
+    /// Verify the integrity of an audit log file.
     Verify {
-        /// Path to the audit log file (JSONL)
+        /// Path to the audit log file (JSONL).
         path: PathBuf,
     },
 }
 
-/// Serializable keypair for file storage. The signing key is secret.
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Serialize)]
 struct KeypairFile {
     id: uuid::Uuid,
     name: String,
@@ -125,7 +150,14 @@ struct KeypairFile {
     signing_key: Vec<u8>,
 }
 
-/// Identity-only file (no private key).
+#[derive(serde::Deserialize)]
+struct KeypairFileIn {
+    id: uuid::Uuid,
+    name: String,
+    public_key: Vec<u8>,
+    signing_key: Vec<u8>,
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct IdentityFile {
     id: uuid::Uuid,
@@ -148,7 +180,7 @@ fn save_keypair(kp: &AgentKeypair, path: &PathBuf) -> Result<(), Box<dyn std::er
 
 fn load_keypair(path: &PathBuf) -> Result<AgentKeypair, Box<dyn std::error::Error>> {
     let data = std::fs::read_to_string(path)?;
-    let file: KeypairFile = serde_json::from_str(&data)?;
+    let file: KeypairFileIn = serde_json::from_str(&data)?;
     let signing_key = ed25519_dalek::SigningKey::from_bytes(
         file.signing_key
             .as_slice()
@@ -165,8 +197,7 @@ fn load_keypair(path: &PathBuf) -> Result<AgentKeypair, Box<dyn std::error::Erro
     Ok(AgentKeypair::from_parts(identity, signing_key))
 }
 
-/// Parse scope entries in the format "resource=action1,action2".
-/// Example: "tool://*=execute,read" or "tool://review=read"
+/// Parse scope entries in the format `resource=action1,action2`.
 fn parse_scope(scope_strs: &[String]) -> Vec<ScopeEntry> {
     scope_strs
         .iter()
@@ -182,7 +213,8 @@ fn parse_scope(scope_strs: &[String]) -> Vec<ScopeEntry> {
                 })
             } else {
                 eprintln!(
-                    "warning: ignoring malformed scope entry (expected resource=action,...): {}",
+                    "{} malformed scope entry (expected `resource=action,...`): {}",
+                    cross(),
                     s
                 );
                 None
@@ -215,10 +247,16 @@ fn parse_duration(s: &str) -> Result<Duration, String> {
 fn main() {
     let cli = Cli::parse();
 
-    let result = match cli.command {
+    if cli.json {
+        style::disable_colors();
+    }
+
+    let result: Result<(), Box<dyn std::error::Error>> = match cli.command {
         Commands::Identity { action } => match action {
-            IdentityAction::Generate { name, output } => cmd_identity_generate(&name, &output),
-            IdentityAction::Show { path } => cmd_identity_show(&path),
+            IdentityAction::Generate { name, output } => {
+                cmd_identity_generate(&name, &output, cli.json)
+            }
+            IdentityAction::Show { path } => cmd_identity_show(&path, cli.json),
         },
         Commands::Token { action } => match action {
             TokenAction::Create {
@@ -230,7 +268,7 @@ fn main() {
                 max_memory,
                 output,
             } => cmd_token_create(
-                &issuer, subject, &scope, &expires, max_fuel, max_memory, &output,
+                &issuer, subject, &scope, &expires, max_fuel, max_memory, &output, cli.json,
             ),
             TokenAction::Attenuate {
                 parent,
@@ -239,37 +277,75 @@ fn main() {
                 scope,
                 max_depth,
                 output,
-            } => cmd_token_attenuate(&parent, &signer, subject, &scope, max_depth, &output),
-            TokenAction::Verify { token, identity } => cmd_token_verify(&token, &identity),
+            } => cmd_token_attenuate(
+                &parent, &signer, subject, &scope, max_depth, &output, cli.json,
+            ),
+            TokenAction::Verify { token, identity } => cmd_token_verify(&token, &identity, cli.json),
         },
         Commands::Audit { action } => match action {
-            AuditAction::Verify { path } => cmd_audit_verify(&path),
+            AuditAction::Verify { path } => cmd_audit_verify(&path, cli.json),
         },
+        Commands::Demo => demo::run(cli.json),
     };
 
     if let Err(e) = result {
-        eprintln!("error: {}", e);
+        if cli.json {
+            let err = serde_json::json!({ "error": e.to_string() });
+            eprintln!("{err}");
+        } else {
+            eprintln!("{} {}", cross(), red(&e.to_string()));
+        }
         std::process::exit(1);
     }
 }
 
-fn cmd_identity_generate(name: &str, output: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_identity_generate(
+    name: &str,
+    output: &PathBuf,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let kp = AgentKeypair::generate(name)?;
-    println!("generated identity: {}", kp.id());
-    println!("name: {}", name);
     save_keypair(&kp, output)?;
-    println!("keypair saved to: {}", output.display());
+    if json {
+        let v = serde_json::json!({
+            "id": kp.id().to_string(),
+            "name": name,
+            "output": output.display().to_string(),
+            "public_key": hex_encode(&kp.identity.public_key),
+        });
+        println!("{}", serde_json::to_string_pretty(&v)?);
+    } else {
+        println!("{} identity generated", check());
+        println!("  {}  {}", dim("id    "), kp.id());
+        println!("  {}  {}", dim("name  "), name);
+        println!("  {}  {}", dim("saved "), output.display());
+    }
     Ok(())
 }
 
-fn cmd_identity_show(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_identity_show(path: &PathBuf, json: bool) -> Result<(), Box<dyn std::error::Error>> {
     let kp = load_keypair(path)?;
-    println!("id: {}", kp.id());
-    println!("name: {}", kp.identity.name);
-    println!("public_key: {}", hex_encode(&kp.identity.public_key));
+    if json {
+        let v = serde_json::json!({
+            "id": kp.id().to_string(),
+            "name": kp.identity.name,
+            "public_key": hex_encode(&kp.identity.public_key),
+        });
+        println!("{}", serde_json::to_string_pretty(&v)?);
+    } else {
+        println!("{} identity", bold(""));
+        println!("  {}  {}", dim("id        "), kp.id());
+        println!("  {}  {}", dim("name      "), kp.identity.name);
+        println!(
+            "  {}  {}",
+            dim("public_key"),
+            cyan(&hex_encode(&kp.identity.public_key))
+        );
+    }
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_token_create(
     issuer_path: &PathBuf,
     subject: uuid::Uuid,
@@ -278,6 +354,7 @@ fn cmd_token_create(
     max_fuel: Option<u64>,
     max_memory: Option<u64>,
     output: &PathBuf,
+    json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let issuer = load_keypair(issuer_path)?;
     let duration = parse_duration(expires)?;
@@ -292,16 +369,32 @@ fn cmd_token_create(
     };
     token.sign(&issuer);
 
-    let json = serde_json::to_string_pretty(&token)?;
-    std::fs::write(output, json)?;
-    println!("token created: {}", token.token_id);
-    println!("issuer: {}", issuer.id());
-    println!("subject: {}", subject);
-    println!("expires: {}", expires_at);
-    println!("saved to: {}", output.display());
+    let token_json = serde_json::to_string_pretty(&token)?;
+    std::fs::write(output, token_json)?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "token_id": token.token_id.to_string(),
+                "issuer": issuer.id().to_string(),
+                "subject": subject.to_string(),
+                "expires_at": expires_at.to_rfc3339(),
+                "output": output.display().to_string(),
+            }))?
+        );
+    } else {
+        println!("{} token created", check());
+        println!("  {}  {}", dim("token_id"), token.token_id);
+        println!("  {}  {}", dim("issuer  "), issuer.id());
+        println!("  {}  {}", dim("subject "), subject);
+        println!("  {}  {}", dim("expires "), expires_at);
+        println!("  {}  {}", dim("saved   "), output.display());
+    }
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_token_attenuate(
     parent_path: &PathBuf,
     signer_path: &PathBuf,
@@ -309,6 +402,7 @@ fn cmd_token_attenuate(
     scope: &[String],
     max_depth: u32,
     output: &PathBuf,
+    json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let parent_json = std::fs::read_to_string(parent_path)?;
     let parent: CapabilityToken = serde_json::from_str(&parent_json)?;
@@ -324,19 +418,35 @@ fn cmd_token_attenuate(
     )?;
     child.sign(&signer);
 
-    let json = serde_json::to_string_pretty(&child)?;
-    std::fs::write(output, json)?;
-    println!("attenuated token created: {}", child.token_id);
-    println!("parent: {}", parent.token_id);
-    println!("subject: {}", subject);
-    println!("depth: {}", child.delegation_depth);
-    println!("saved to: {}", output.display());
+    let child_json = serde_json::to_string_pretty(&child)?;
+    std::fs::write(output, child_json)?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "token_id": child.token_id.to_string(),
+                "parent_id": parent.token_id.to_string(),
+                "subject": subject.to_string(),
+                "delegation_depth": child.delegation_depth,
+                "output": output.display().to_string(),
+            }))?
+        );
+    } else {
+        println!("{} attenuated token created", check());
+        println!("  {}  {}", dim("token_id "), child.token_id);
+        println!("  {}  {}", dim("parent   "), parent.token_id);
+        println!("  {}  {}", dim("subject  "), subject);
+        println!("  {}  {}", dim("depth    "), child.delegation_depth);
+        println!("  {}  {}", dim("saved    "), output.display());
+    }
     Ok(())
 }
 
 fn cmd_token_verify(
     token_path: &PathBuf,
     identity_path: &PathBuf,
+    json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let token_json = std::fs::read_to_string(token_path)?;
     let token: CapabilityToken = serde_json::from_str(&token_json)?;
@@ -357,36 +467,78 @@ fn cmd_token_verify(
 
     match token.verify_signature(&identity) {
         Ok(()) => {
-            println!("signature valid");
-            println!("token: {}", token.token_id);
-            println!("issuer: {}", token.issuer_id);
-            println!("subject: {}", token.subject_id);
-            println!("expires: {}", token.expires_at);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "valid": true,
+                        "token_id": token.token_id.to_string(),
+                        "issuer": token.issuer_id.to_string(),
+                        "subject": token.subject_id.to_string(),
+                        "expires_at": token.expires_at.to_rfc3339(),
+                    }))?
+                );
+            } else {
+                println!("{} signature valid", check());
+                println!("  {}  {}", dim("token_id"), token.token_id);
+                println!("  {}  {}", dim("issuer  "), token.issuer_id);
+                println!("  {}  {}", dim("subject "), token.subject_id);
+                println!("  {}  {}", dim("expires "), token.expires_at);
+            }
             Ok(())
         }
         Err(e) => {
-            println!("signature INVALID: {}", e);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "valid": false,
+                        "error": e.to_string(),
+                    }))?
+                );
+            } else {
+                println!("{} signature INVALID — {}", cross(), red(&e.to_string()));
+            }
             std::process::exit(1);
         }
     }
 }
 
-fn cmd_audit_verify(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_audit_verify(path: &Path, json: bool) -> Result<(), Box<dyn std::error::Error>> {
     let log = AuditLog::with_persistence(path.to_path_buf())?;
     match log.verify_integrity() {
         Ok(()) => {
-            println!("audit log integrity verified");
-            println!("entries: {}", log.len());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "valid": true,
+                        "entries": log.len(),
+                    }))?
+                );
+            } else {
+                println!("{} audit log integrity verified", check());
+                println!("  {}  {}", dim("entries"), log.len());
+            }
             Ok(())
         }
         Err(e) => {
-            println!("audit log INVALID: {}", e);
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "valid": false,
+                        "error": e.to_string(),
+                    }))?
+                );
+            } else {
+                println!("{} audit log INVALID — {}", cross(), red(&e.to_string()));
+            }
             std::process::exit(1);
         }
     }
 }
 
-/// Simple hex encoding without pulling in the hex crate.
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }

@@ -8,7 +8,7 @@ homepage.workspace = true
 authors.workspace = true
 categories.workspace = true
 keywords.workspace = true
-description = "Moat relay: agent registry, message routing, discovery"
+description = "Moat relay — agent registry and message router with built-in PEP verification, audit logging, runtime monitoring, rate limiting, and replay protection."
 
 [dependencies]
 moat-core = { workspace = true }

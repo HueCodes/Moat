@@ -1,10 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/moat-protocol",
     "crates/moat-core",
     "crates/moat-runtime",
     "crates/moat-relay",
     "crates/moat-cli",
+    "crates/moat-wasm",
     "examples/ping_pong",
     "examples/delegated_task",
     "examples/secret_injection",
@@ -50,7 +52,11 @@ wasmtime-wasi = "29"
 cap-std = "3"
 wat = "1"
 
+# Bench (dev-only)
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
 # Workspace crates
-moat-core = { path = "crates/moat-core" }
-moat-runtime = { path = "crates/moat-runtime" }
-moat-relay = { path = "crates/moat-relay" }
+moat-protocol = { path = "crates/moat-protocol", version = "0.1.0" }
+moat-core = { path = "crates/moat-core", version = "0.1.0" }
+moat-runtime = { path = "crates/moat-runtime", version = "0.1.0" }
+moat-relay = { path = "crates/moat-relay", version = "0.1.0" }

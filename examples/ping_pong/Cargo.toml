@@ -5,7 +5,5 @@ edition = "2021"
 publish = false
 
 [dependencies]
-moat-core = { path = "../../crates/moat-core" }
-moat-runtime = { path = "../../crates/moat-runtime" }
-moat-relay = { path = "../../crates/moat-relay" }
+moat-protocol = { path = "../../crates/moat-protocol" }
 chrono = { version = "0.4", features = ["serde"] }

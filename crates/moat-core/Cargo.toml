@@ -8,7 +8,7 @@ homepage.workspace = true
 authors.workspace = true
 categories.workspace = true
 keywords.workspace = true
-description = "Core types for the Moat agent sandbox protocol: identity, capabilities, policy, messages, errors"
+description = "Moat core types — Ed25519 identity, signed capability tokens with monotonic attenuation, and cryptographic authenticated messages. The security primitives behind the Moat agent runtime (mTLS for AI agents)."
 
 [dependencies]
 ed25519-dalek = { workspace = true }
@@ -23,3 +23,8 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "crypto"
+harness = false

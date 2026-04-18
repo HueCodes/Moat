@@ -1,42 +1,35 @@
-//! Basic two-agent communication example.
+//! Basic two-agent communication example — uses the high-level `moat::Moat` facade.
 //!
-//! Demonstrates the simplest Moat interaction: two agents exchange signed
-//! messages through a relay, each authorized by scoped capability tokens.
-//! The PEP verifies signatures, policy bindings, and capabilities on every hop.
+//! Alice grants Bob a send-only token. Bob's "ping" goes through. Bob's attempt
+//! to `receive` is rejected at stage 3 because his attenuated token doesn't
+//! carry that action.
 
 use chrono::{Duration, Utc};
-use moat_core::{
-    AgentKeypair, AuthenticatedMessage, CapabilityToken, PolicyBinding, ResourceLimits, ScopeEntry,
+use moat_protocol::{
+    AgentKeypair, AuthenticatedMessage, CapabilityToken, Moat, PolicyBinding, ResourceLimits,
+    ScopeEntry,
 };
-use moat_relay::MessageRouter;
-use moat_runtime::MonitorThresholds;
 
 fn main() {
     println!("=== Moat Ping-Pong Example ===\n");
 
-    // Shared policy binding — both agents must reference the same policy
-    let policy = PolicyBinding::new("ping-pong-v1", b"ping pong policy");
-
-    // Create the relay with default monitor thresholds
-    let mut router = MessageRouter::new(policy.clone(), MonitorThresholds::default());
-
-    // --- Create two agents ---
     let alice = AgentKeypair::generate("alice").unwrap();
     let bob = AgentKeypair::generate("bob").unwrap();
 
     println!("Alice: {}", alice.id());
     println!("Bob:   {}", bob.id());
 
-    // Register both agents and trust Alice as a root issuer
-    for agent in [&alice, &bob] {
-        router.registry.register(agent.identity.clone()).unwrap();
-        router.pep.register_identity(agent.identity.clone());
-    }
-    router.pep.add_trusted_root(alice.id());
+    // Build the whole runtime — registry, PEP, audit log, monitor — in one chain.
+    let policy = PolicyBinding::new("ping-pong-v1", b"ping pong policy");
+    let mut moat = Moat::builder()
+        .policy(policy.clone())
+        .agent(alice.identity.clone())
+        .agent(bob.identity.clone())
+        .trust_root(alice.id())
+        .build()
+        .unwrap();
 
-    // --- Alice creates tokens ---
-
-    // Alice's own root token
+    // Alice's self-issued root token: full send + receive on the channel.
     let mut alice_token =
         CapabilityToken::root(alice.id(), alice.id(), Utc::now() + Duration::hours(1));
     alice_token.allowed = vec![ScopeEntry {
@@ -45,7 +38,7 @@ fn main() {
     }];
     alice_token.sign(&alice);
 
-    // Bob gets an attenuated token — send-only, less fuel
+    // Attenuate for Bob: send only, less fuel.
     let mut bob_token = alice_token
         .attenuate(
             bob.id(),
@@ -68,7 +61,7 @@ fn main() {
     println!("  Alice: send + receive on channel://ping-pong");
     println!("  Bob:   send only on channel://ping-pong");
 
-    // --- Ping: Alice sends to Bob ---
+    // --- Ping ---
     println!("\n--- Ping ---");
     let ping = AuthenticatedMessage::create(
         &alice,
@@ -80,15 +73,14 @@ fn main() {
         1,
     )
     .unwrap();
-
-    let result = router.route(&ping, "channel://ping-pong", "send").unwrap();
+    let result = moat.route(&ping, "channel://ping-pong", "send").unwrap();
     println!(
         "Alice -> Bob (send): {}",
         if result.allowed { "ALLOWED" } else { "DENIED" }
     );
     assert!(result.allowed);
 
-    // --- Pong: Bob replies ---
+    // --- Pong ---
     println!("\n--- Pong ---");
     let pong = AuthenticatedMessage::create(
         &bob,
@@ -100,28 +92,26 @@ fn main() {
         1,
     )
     .unwrap();
-
-    let result = router.route(&pong, "channel://ping-pong", "send").unwrap();
+    let result = moat.route(&pong, "channel://ping-pong", "send").unwrap();
     println!(
         "Bob -> Alice (send): {}",
         if result.allowed { "ALLOWED" } else { "DENIED" }
     );
     assert!(result.allowed);
 
-    // --- Bob tries to receive (not in his token scope) ---
+    // --- Bob tries to receive (outside his scope) ---
     println!("\n--- Scope enforcement ---");
     let bad_msg = AuthenticatedMessage::create(
         &bob,
         alice.id(),
         b"trying to receive".to_vec(),
-        bob_token.clone(),
-        vec![alice_token.clone()],
-        policy.clone(),
+        bob_token,
+        vec![alice_token],
+        policy,
         2,
     )
     .unwrap();
-
-    let result = router
+    let result = moat
         .route(&bad_msg, "channel://ping-pong", "receive")
         .unwrap();
     println!(
@@ -131,8 +121,8 @@ fn main() {
     assert!(!result.allowed);
 
     // --- Audit trail ---
-    println!("\n--- Audit log ({} entries) ---", router.audit_log.len());
-    assert!(router.audit_log.verify_integrity().is_ok());
+    println!("\n--- Audit log ({} entries) ---", moat.audit_log().len());
+    assert!(moat.audit_log().verify_integrity().is_ok());
     println!("Integrity: verified");
 
     println!("\nDone.");

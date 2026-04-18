@@ -1,0 +1,35 @@
+{
+  "name": "@moat/core",
+  "version": "0.1.0",
+  "description": "Moat core security primitives compiled to WebAssembly — call signed identities, capability tokens, and message verification from TypeScript/JavaScript in Node or the browser.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/moat-protocol/moat.git",
+    "directory": "crates/moat-wasm"
+  },
+  "homepage": "https://github.com/moat-protocol/moat",
+  "keywords": [
+    "moat",
+    "agent",
+    "ai",
+    "security",
+    "capability",
+    "ed25519",
+    "wasm",
+    "mcp",
+    "langchain",
+    "crewai"
+  ],
+  "main": "pkg/moat_wasm.js",
+  "types": "pkg/moat_wasm.d.ts",
+  "files": [
+    "pkg/"
+  ],
+  "scripts": {
+    "build": "wasm-pack build --target nodejs --out-dir pkg --release",
+    "build:web": "wasm-pack build --target web --out-dir pkg-web --release",
+    "build:bundler": "wasm-pack build --target bundler --out-dir pkg-bundler --release",
+    "smoke": "node test/smoke.mjs"
+  }
+}

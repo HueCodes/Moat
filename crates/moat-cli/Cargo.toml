@@ -6,9 +6,10 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Command-line interface for the Moat agent sandbox protocol"
+description = "Moat CLI — generate agent identities, issue and attenuate capability tokens, verify audit logs, and run scripted multi-agent security demos."
 
 [dependencies]
+moat-protocol = { workspace = true }
 moat-core = { workspace = true }
 moat-runtime = { workspace = true }
 moat-relay = { workspace = true }

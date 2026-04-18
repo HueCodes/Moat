@@ -1,183 +1,183 @@
-# Moat Protocol
+# Moat
 
-Cryptographically enforced, sandboxed agent-to-agent communication runtime in Rust.
+**The missing security layer for MCP, LangChain, and CrewAI.**
+_mTLS for AI agents, in Rust._
 
-Zero-trust from the ground up: every agent has an Ed25519 identity, every message is signed, every action is authorized via capability tokens with monotonic attenuation, and every decision is audit-logged in a tamper-evident SHA-256 hash chain.
-
-## Why Moat?
-
-Multi-agent systems are powerful but dangerous. A misbehaving agent can poison another's memory, escalate its own privileges, or drift from its original intent through a sequence of individually-reasonable actions. Moat treats every agent as untrusted by default and enforces security at the runtime level — not through prompts or conventions.
-
-**Moat defends against five documented attack classes:**
-
-| Attack | Defense |
-|---|---|
-| **Skill Poisoning** — malicious plugins replacing legitimate tools | Cryptographic identity verification at registration |
-| **Indirect Prompt Injection** — external content hijacking control flow | Strict data/control plane separation via Wasm sandbox |
-| **Memory Poisoning** — fabricated rules injected into persistent memory | Cross-sandbox state transfers treated as untrusted input |
-| **Intent Drift** — individually reasonable actions escalating into unauthorized behavior | Runtime monitor tracking cumulative action trajectories |
-| **Privilege Escalation** — incremental assembly of dangerous operations | OS-level confinement via Wasm sandbox + capability attenuation |
-
-## Architecture
+Agent frameworks today have no security boundary between agents. When Agent A delegates to Agent B, B inherits ambient access to everything A can reach — no attenuation, no audit trail, no enforcement. Moat fixes that at the runtime level: every agent has an Ed25519 identity, every message is signed, every capability is attenuated on delegation, every action is audit-logged in a tamper-evident hash chain, and every untrusted execution happens inside a Wasm sandbox.
 
 ```
-Agent A ──AuthenticatedMessage──> MessageRouter ──> Agent B
-                                      │
-                            PolicyEnforcementPoint
-                            ├─ Stage 1: Signature verification + replay protection
-                            ├─ Stage 2: Policy binding verification
-                            └─ Stage 3: Capability token evaluation + chain walk
-                                      │
-                            AuditLog (SHA-256 hash chain)
-                            RuntimeMonitor (FSM + sliding windows)
-                            SecretProxy (handle-based injection)
-                            Sandbox (Wasmtime + WASI)
+┌─────────┐   signed + capability-bound msg   ┌─────────┐
+│ Agent A │ ─────────────────────────────────▶│ Agent B │
+└─────────┘                                   └─────────┘
+                      │
+              ┌───────▼────────┐
+              │      PEP       │  1. signature + replay
+              │ (3-stage gate) │  2. policy binding
+              └───────┬────────┘  3. capability + chain walk
+                      │
+      ┌───────────────┼────────────────┐
+      ▼               ▼                ▼
+ AuditLog       RuntimeMonitor    Wasm Sandbox
+ (hash chain)   (FSM + windows)   (default-deny)
 ```
 
-### Crate map
+## Why this exists
 
-| Crate | Purpose |
+A misbehaving or compromised agent can poison another's memory, escalate its own privileges, or drift from its intent through a sequence of individually-reasonable actions. Prompt-layer guardrails don't stop any of that. Moat treats every agent as untrusted by default and enforces security cryptographically.
+
+| Attack class | Moat's defense |
 |---|---|
-| [`moat-core`](crates/moat-core) | Identity, capability tokens, messages, errors (pure types, no IO) |
-| [`moat-runtime`](crates/moat-runtime) | PEP, Wasm sandbox, audit log, runtime monitor, secret proxy |
-| [`moat-relay`](crates/moat-relay) | Agent registry, message router, integration tests |
-| [`moat-cli`](crates/moat-cli) | CLI tool (`moat identity`, `moat token`, `moat audit`) |
+| **Skill poisoning** — malicious plugins replacing legitimate tools | Signed identity at registration; PEP rejects unknown issuers |
+| **Indirect prompt injection** — external content hijacking control flow | Wasm sandbox with strict data/control plane separation |
+| **Memory poisoning** — fabricated rules injected across sessions | Cross-sandbox state treated as untrusted input |
+| **Intent drift** — benign-looking actions escalating over time | Runtime monitor tracks cumulative trajectories and FSM transitions |
+| **Privilege escalation** — incremental assembly of dangerous ops | OS-level confinement + monotonic capability attenuation |
+
+Grounded in the threat model from [Authenticated Workflows (arXiv:2602.10465)](https://arxiv.org/), [Taming OpenClaw (arXiv:2603.11619)](https://arxiv.org/), [AgentGuard (arXiv:2509.23864)](https://arxiv.org/), and NVIDIA's 2026 agent security guidance.
 
 ## Quick start
 
 ```bash
-# Clone and build
 git clone https://github.com/moat-protocol/moat.git
 cd moat
 cargo build --workspace
-
-# Run the test suite (83 tests)
-cargo test --workspace
-
-# Try an example
-cargo run --example orchestrated_pipeline -p moat-relay
+cargo test --workspace          # 83 tests
+cargo run -p moat-cli -- demo   # scripted 3-agent scenario
 ```
 
-### Create an agent identity and issue a scoped token
+### Issue a capability, attenuate it, verify a message
 
 ```rust
 use chrono::{Duration, Utc};
-use moat_core::{
-    AgentKeypair, CapabilityToken, ResourceLimits, ScopeEntry,
-};
+use moat_core::{AgentKeypair, CapabilityToken, ResourceLimits, ScopeEntry};
 
-// Every agent gets an Ed25519 keypair
-let coordinator = AgentKeypair::generate("coordinator").unwrap();
-let worker = AgentKeypair::generate("worker").unwrap();
+let coordinator = AgentKeypair::generate("coordinator")?;
+let worker      = AgentKeypair::generate("worker")?;
 
-// Coordinator creates a root token with broad permissions
-let mut root_token = CapabilityToken::root(
-    coordinator.id(),
-    coordinator.id(),
-    Utc::now() + Duration::hours(1),
+// Root token: coordinator grants itself broad rights
+let mut root = CapabilityToken::root(
+    coordinator.id(), coordinator.id(), Utc::now() + Duration::hours(1),
 );
-root_token.allowed = vec![ScopeEntry {
+root.allowed = vec![ScopeEntry {
     resource: "tool://analyze".into(),
-    actions: vec!["read".into(), "execute".into()],
+    actions:  vec!["read".into(), "execute".into()],
 }];
-root_token.sign(&coordinator);
+root.sign(&coordinator);
 
-// Attenuate: worker gets read-only access, less fuel, less memory.
-// Attenuation is monotonic — scope can only narrow, never widen.
-let mut worker_token = root_token.attenuate(
+// Delegate a narrower slice to the worker — monotonic attenuation.
+// Trying to *broaden* scope here returns an error at compile-of-intent.
+let mut worker_tok = root.attenuate(
     worker.id(),
-    vec![ScopeEntry {
-        resource: "tool://analyze".into(),
-        actions: vec!["read".into()],  // no "execute"
-    }],
-    vec![],  // no additional denials
-    ResourceLimits {
-        max_fuel: Some(1_000_000),
-        max_memory_bytes: Some(32 * 1024 * 1024),
-        ..Default::default()
-    },
-    10,  // max delegation depth
-).unwrap();
-worker_token.sign(&coordinator);
+    vec![ScopeEntry { resource: "tool://analyze".into(), actions: vec!["read".into()] }],
+    vec![],
+    ResourceLimits { max_fuel: Some(1_000_000), ..Default::default() },
+    10,
+)?;
+worker_tok.sign(&coordinator);
 ```
 
-### Send an authenticated message through the relay
+Full routing, PEP verification, and audit-log integration is in [`examples/orchestrated_pipeline`](crates/moat-relay/examples/orchestrated_pipeline.rs).
 
-```rust
-use moat_core::{AuthenticatedMessage, PolicyBinding};
-use moat_relay::MessageRouter;
-use moat_runtime::MonitorThresholds;
+## Crates
 
-let policy = PolicyBinding::new("v1", b"policy document");
-let mut router = MessageRouter::new(policy.clone(), MonitorThresholds::default());
+| Crate | Purpose |
+|---|---|
+| [`moat`](crates/moat) | **Entry point.** High-level `Moat` builder that hides PEP/registry/router plumbing; re-exports everything else. |
+| [`moat-core`](crates/moat-core) | Identity, capability tokens, messages, errors — pure types, no IO |
+| [`moat-runtime`](crates/moat-runtime) | PEP, Wasm sandbox, audit log, runtime monitor, secret proxy |
+| [`moat-relay`](crates/moat-relay) | Agent registry, message router, integration tests |
+| [`moat-cli`](crates/moat-cli) | `moat identity`, `moat token`, `moat audit`, `moat demo` |
+| [`moat-wasm`](crates/moat-wasm) | WebAssembly bindings for Node / browser — published as [`@moat/core`](crates/moat-wasm/README.md) on npm |
 
-// Register agents and trust the coordinator
-router.registry.register(coordinator.identity.clone()).unwrap();
-router.registry.register(worker.identity.clone()).unwrap();
-router.pep.register_identity(coordinator.identity.clone());
-router.pep.register_identity(worker.identity.clone());
-router.pep.add_trusted_root(coordinator.id());
+## TypeScript / JavaScript
 
-// Worker sends a signed message
-let msg = AuthenticatedMessage::create(
-    &worker,
-    coordinator.id(),
-    b"analysis complete".to_vec(),
-    worker_token.clone(),
-    vec![root_token.clone()],  // token chain for verification
-    policy.clone(),
-    1,  // sequence number
-).unwrap();
+Moat's core primitives are also available from JS via WebAssembly:
 
-// Route through PEP — signature, policy, and capability are all verified
-let decision = router.route(&msg, "tool://analyze", "read").unwrap();
-assert!(decision.allowed);
+```ts
+import * as moat from '@moat/core';
+const alice = JSON.parse(moat.generateKeypair('alice'));
+const root  = moat.rootToken(
+  alice.signing_key_hex, alice.name, alice.id,
+  JSON.stringify([{ resource: 'tool://analyze', actions: ['read'] }]),
+  3600,
+);
+// Broadening throws — monotonic attenuation is enforced in Rust.
 ```
+
+See [`crates/moat-wasm`](crates/moat-wasm) for the full TS/JS API and build instructions.
 
 ## CLI
 
 ```bash
-# Generate a new agent identity
-moat identity generate --name my-agent
-
-# Show identity details
-moat identity show --name my-agent
-
-# Create a capability token
-moat token create --issuer my-agent --subject worker \
-    --resource "tool://analyze" --actions read,execute \
-    --max-fuel 1000000 --expires-in 1h
-
-# Attenuate an existing token (narrow scope)
-moat token attenuate --token <token-file> \
-    --subject sub-worker --resource "tool://analyze" --actions read
-
-# Verify token signature chain
-moat token verify --token <token-file>
-
-# Verify audit log integrity
+moat identity generate --name alice
+moat token create --issuer alice --subject bob \
+  --resource "tool://analyze" --actions read,execute \
+  --max-fuel 1000000 --expires-in 1h
+moat token attenuate --token bob.token --subject carol \
+  --resource "tool://analyze" --actions read
+moat token verify --token carol.token
 moat audit verify --path audit.jsonl
+moat demo                       # runs the multi-agent delegation scenario
 ```
 
 ## Security model
 
-Moat's security rests on three invariants:
+Three invariants, none negotiable:
 
-1. **Capability tokens are always signed.** Unsigned tokens are rejected. Token delegation chains are verified back to trusted roots.
-2. **Attenuation is monotonic.** A child token's scope is always a subset of its parent's. Denials are additive. Resource limits can only tighten.
-3. **The audit log is tamper-evident.** Every PEP decision, sandbox action, and secret resolution is recorded in a SHA-256 hash chain. Modifying any entry breaks all subsequent hashes.
+1. **Capability tokens are always signed.** Unsigned tokens are rejected. Delegation chains are verified back to a trusted root.
+2. **Attenuation is monotonic.** A child's scope is a subset of its parent's; denials are additive; resource limits only tighten. Proven by construction in `CapabilityToken::attenuate`.
+3. **Audit log is tamper-evident.** Every PEP decision, sandbox action, secret resolution, and monitor alert is appended to a SHA-256 hash chain. Any retroactive mutation breaks all subsequent hashes.
 
-Additional guarantees:
-- **Replay protection**: per-sender monotonic sequence numbers
-- **Secret isolation**: agents receive opaque handles; the runtime injects values at the point of use
-- **Sandbox default-deny**: no filesystem or network access unless explicitly granted by capability token
-- **Pure-Rust stack**: no C bindings, no OpenSSL, no ring — auditable all the way down
+Plus:
 
-See [`spec/PROTOCOL.md`](spec/PROTOCOL.md) for the formal protocol specification and threat model.
+- **Replay protection** via per-sender monotonic sequence numbers, persisted across restarts
+- **Secret isolation** — agents hold opaque handles; the runtime injects values at point-of-use
+- **Sandbox default-deny** — no filesystem or network unless explicitly granted by a capability token
+- **Pure-Rust stack** — no C bindings, no OpenSSL, no ring; auditable all the way down
+
+Formal specification and threat model: [`spec/PROTOCOL.md`](spec/PROTOCOL.md).
+
+## Status & limitations
+
+This is an MVP. It is honest about what it does and doesn't do.
+
+**Implemented and tested:**
+- Ed25519 identity, signing, verification (`ed25519-dalek`)
+- Signed capability tokens with monotonic attenuation + chain verification
+- Three-stage PEP (signature + replay, policy binding, capability evaluation)
+- Wasm sandbox via `wasmtime` + WASI Preview1 with fuel, memory, and filesystem pre-opens
+- Append-only audit log with SHA-256 hash chain + optional JSONL persistence
+- Runtime monitor: FSM transitions, sliding-window rates, pattern detection
+- Secret proxy with per-agent ACLs, revocation, HTTP header injection
+- Router: rate limiting, payload size caps, timestamp expiry, recipient existence checks
+
+**Known limitations:**
+- Wildcard resource matching is **prefix-only** (`tool://*` matches `tool://anything` but not `tool://*/read`)
+- **WASI Preview2 network APIs are not yet stable** — the `network_allowed` flag is enforced as default-deny via WASI defaults but there is no allowlist enforcement for egress yet
+- **Single-process relay** — no multi-node federation
+- **No MAPL parser** — policies are expressed as Rust structs, not a DSL
+- **No web dashboard** yet
+- Attestations are structurally present but not deeply integrated into PEP evaluation
+
+Contributions and scrutiny welcome. File an issue if you spot something.
+
+## Performance
+
+Measured on an Apple M2, release mode, `criterion` bench suite (`cargo bench -p moat-core`):
+
+| Operation | Time | Throughput |
+|---|---|---|
+| `CapabilityToken::sign` | 14.4 µs | ~69 k/s |
+| `CapabilityToken::verify_signature` | 32.4 µs | ~31 k/s |
+| `CapabilityToken::is_action_allowed` | 40 ns | ~25 M/s |
+| `AuthenticatedMessage::create` (256 B payload) | 14.2 µs | ~70 k/s |
+| `AuthenticatedMessage::verify_signature` (256 B payload) | 31.5 µs | ~32 k/s |
+
+Verification is the PEP's hot path — in round numbers, a single core handles **~30,000 authenticated messages per second** end-to-end before any business logic runs. Ed25519 verify dominates; the canonical-bytes SHA-256 prehash and UUID copies are noise.
 
 ## Dependencies
 
-All pure Rust:
+All pure Rust.
 
 | Category | Crates |
 |---|---|
@@ -189,23 +189,16 @@ All pure Rust:
 | Observability | `tracing` 0.1 |
 | CLI | `clap` 4 |
 
-## Known limitations (MVP)
-
-- Wildcard matching is prefix-only (`tool://*` matches `tool://anything`, not `tool://*/read`)
-- WASI Preview2 network APIs not yet available — `network_allowed` flag is documented but not enforced
-- Single-process relay (no multi-node federation)
-- MAPL policy language not yet implemented (policies are Rust structs)
-- No web UI/dashboard
-
 ## Contributing
 
 ```bash
-# The full gate — run before every commit
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+All three must be green before a PR lands.
+
 ## License
 
-[Apache-2.0](LICENSE)
+[Apache-2.0](LICENSE).

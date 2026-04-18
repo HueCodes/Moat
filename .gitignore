@@ -1,1 +1,6 @@
 /target
+# wasm-pack build output
+crates/moat-wasm/pkg/
+crates/moat-wasm/pkg-web/
+crates/moat-wasm/pkg-bundler/
+node_modules/
