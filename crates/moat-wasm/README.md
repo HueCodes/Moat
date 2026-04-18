@@ -1,6 +1,6 @@
 # @moat/core
 
-WebAssembly bindings for [Moat](https://github.com/moat-protocol/moat) — the missing security layer for AI agents. Call the Moat cryptographic primitives (signed identities, capability tokens with monotonic attenuation, authenticated-message verification) from TypeScript or JavaScript in Node or the browser.
+WebAssembly bindings for [Moat](https://github.com/HueCodes/Moat) — the missing security layer for AI agents. Call the Moat cryptographic primitives (signed identities, capability tokens with monotonic attenuation, authenticated-message verification) from TypeScript or JavaScript in Node or the browser.
 
 > This is the thin JS face of a Rust runtime. If you want full PEP + audit-log + Wasm-sandbox enforcement, run the [`moat` Rust crate](https://crates.io/crates/moat) as a sidecar. `@moat/core` is for in-process token issuance, attenuation, and verification.
 

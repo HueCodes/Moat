@@ -33,12 +33,12 @@ A misbehaving or compromised agent can poison another's memory, escalate its own
 | **Intent drift** — benign-looking actions escalating over time | Runtime monitor tracks cumulative trajectories and FSM transitions |
 | **Privilege escalation** — incremental assembly of dangerous ops | OS-level confinement + monotonic capability attenuation |
 
-Grounded in the threat model from [Authenticated Workflows (arXiv:2602.10465)](https://arxiv.org/), [Taming OpenClaw (arXiv:2603.11619)](https://arxiv.org/), [AgentGuard (arXiv:2509.23864)](https://arxiv.org/), and NVIDIA's 2026 agent security guidance.
+Grounded in the threat model from [Authenticated Workflows (Rajagopalan & Rao, 2026)](https://arxiv.org/abs/2602.10465), [Taming OpenClaw (Deng et al., 2026)](https://arxiv.org/abs/2603.11619), [AgentGuard (Koohestani, 2025 — ASE '25)](https://arxiv.org/abs/2509.23864), and NVIDIA's 2026 agent security guidance.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/moat-protocol/moat.git
+git clone https://github.com/HueCodes/Moat.git
 cd moat
 cargo build --workspace
 cargo test --workspace          # 83 tests

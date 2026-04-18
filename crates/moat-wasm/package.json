@@ -5,10 +5,10 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/moat-protocol/moat.git",
+    "url": "https://github.com/HueCodes/Moat.git",
     "directory": "crates/moat-wasm"
   },
-  "homepage": "https://github.com/moat-protocol/moat",
+  "homepage": "https://github.com/HueCodes/Moat",
   "keywords": [
     "moat",
     "agent",
