@@ -4,3 +4,8 @@ crates/moat-wasm/pkg/
 crates/moat-wasm/pkg-web/
 crates/moat-wasm/pkg-bundler/
 node_modules/
+
+# Local tool / editor state
+.claude/
+.DS_Store
+*.rs.bk
