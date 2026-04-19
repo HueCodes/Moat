@@ -60,8 +60,16 @@ pub fn run(json: bool) -> Result<(), Box<dyn std::error::Error>> {
     if !json {
         section("Runtime");
         line(format!("{} policy         {}", check(), dim("demo-v1")));
-        line(format!("{} agents         {}", check(), dim("coordinator, reviewer, tester, deployer")));
-        line(format!("{} trusted root   {}", check(), cyan("coordinator")));
+        line(format!(
+            "{} agents         {}",
+            check(),
+            dim("coordinator, reviewer, tester, deployer")
+        ));
+        line(format!(
+            "{} trusted root   {}",
+            check(),
+            cyan("coordinator")
+        ));
     }
 
     // --- Tokens ---
@@ -366,7 +374,10 @@ pub fn run(json: bool) -> Result<(), Box<dyn std::error::Error>> {
         if integrity_ok && allowed == 3 && denied == 3 && anomalies == 0 {
             println!("{}", green("All security invariants held."));
         } else {
-            println!("{}", red("Security invariants NOT fully held — inspect audit log."));
+            println!(
+                "{}",
+                red("Security invariants NOT fully held — inspect audit log.")
+            );
         }
     }
     Ok(())
@@ -374,8 +385,14 @@ pub fn run(json: bool) -> Result<(), Box<dyn std::error::Error>> {
 
 fn header() {
     println!();
-    println!("{}", bold("Moat Demo — multi-agent delegation with capability attenuation"));
-    println!("{}", dim("coordinator → reviewer / tester / deployer, plus three escape attempts"));
+    println!(
+        "{}",
+        bold("Moat Demo — multi-agent delegation with capability attenuation")
+    );
+    println!(
+        "{}",
+        dim("coordinator → reviewer / tester / deployer, plus three escape attempts")
+    );
     println!();
 }
 

@@ -280,7 +280,9 @@ fn main() {
             } => cmd_token_attenuate(
                 &parent, &signer, subject, &scope, max_depth, &output, cli.json,
             ),
-            TokenAction::Verify { token, identity } => cmd_token_verify(&token, &identity, cli.json),
+            TokenAction::Verify { token, identity } => {
+                cmd_token_verify(&token, &identity, cli.json)
+            }
         },
         Commands::Audit { action } => match action {
             AuditAction::Verify { path } => cmd_audit_verify(&path, cli.json),

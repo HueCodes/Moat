@@ -60,12 +60,12 @@ pub use moat_core::{
     ResourceLimits, ScopeEntry,
 };
 
+pub use moat_runtime::monitor::MonitorAlert;
 pub use moat_runtime::{
     ActionPattern, AgentState, AuditEventKind, AuditLog, MonitorSnapshot, MonitorThresholds,
     PepDecision, PepStage, PepState, PolicyEnforcementPoint, RuntimeMonitor, Sandbox,
     SandboxConfig, SandboxResult, SecretHandle, SecretProxy, WindowConfig,
 };
-pub use moat_runtime::monitor::MonitorAlert;
 
-pub use moat_relay::{AgentRegistry, MessageRouter};
 pub use moat_relay::router::{RouteResult, RouterLimits};
+pub use moat_relay::{AgentRegistry, MessageRouter};

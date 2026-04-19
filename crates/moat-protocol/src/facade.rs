@@ -188,11 +188,8 @@ mod tests {
     use moat_core::{AgentKeypair, CapabilityToken, ResourceLimits, ScopeEntry};
 
     fn self_issued_root(issuer: &AgentKeypair) -> CapabilityToken {
-        let mut token = CapabilityToken::root(
-            issuer.id(),
-            issuer.id(),
-            Utc::now() + Duration::hours(1),
-        );
+        let mut token =
+            CapabilityToken::root(issuer.id(), issuer.id(), Utc::now() + Duration::hours(1));
         token.allowed = vec![ScopeEntry {
             resource: "tool://analyze".into(),
             actions: vec!["read".into(), "execute".into()],
@@ -266,7 +263,10 @@ mod tests {
     #[test]
     fn escape_hatch_router_mut_still_works() {
         let coord = AgentKeypair::generate("coord").unwrap();
-        let mut moat = Moat::builder().agent(coord.identity.clone()).build().unwrap();
+        let mut moat = Moat::builder()
+            .agent(coord.identity.clone())
+            .build()
+            .unwrap();
         // Power user can still tweak monitor thresholds post-build.
         moat.router_mut()
             .monitor
