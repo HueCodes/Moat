@@ -47,13 +47,14 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # Sandbox
-wasmtime = "29"
-wasmtime-wasi = "29"
-cap-std = "3"
+wasmtime = "44"
+wasmtime-wasi = "44"
+cap-std = "4"
 wat = "1"
 
 # Bench (dev-only)
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+tempfile = "3"
 
 # Workspace crates
 moat-protocol = { path = "crates/moat-protocol", version = "0.1.0" }

@@ -18,7 +18,7 @@
 
 use moat_core::{MoatError, ResourceLimits};
 use wasmtime::*;
-use wasmtime_wasi::preview1::{self, WasiP1Ctx};
+use wasmtime_wasi::p1::{self, WasiP1Ctx};
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder};
 
 /// Configuration derived from a capability token's resource limits.
@@ -132,7 +132,7 @@ impl Sandbox {
 
         // Create linker with WASI
         let mut linker: Linker<SandboxState> = Linker::new(&self.engine);
-        preview1::add_to_linker_sync(&mut linker, |state: &mut SandboxState| &mut state.wasi)
+        p1::add_to_linker_sync(&mut linker, |state: &mut SandboxState| &mut state.wasi)
             .map_err(|e| MoatError::Sandbox(format!("WASI linker: {}", e)))?;
 
         let instance = linker

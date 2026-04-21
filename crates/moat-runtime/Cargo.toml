@@ -29,3 +29,4 @@ rand = { workspace = true }
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
 wat = { workspace = true }
+tempfile = { workspace = true }

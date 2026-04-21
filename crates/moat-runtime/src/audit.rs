@@ -354,9 +354,8 @@ mod tests {
 
     #[test]
     fn persistent_audit_log_survives_reload() {
-        let dir = std::env::temp_dir().join(format!("moat-audit-test-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let log_path = dir.join("audit.jsonl");
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("audit.jsonl");
 
         let agent = Uuid::new_v4();
 
@@ -398,16 +397,12 @@ mod tests {
             assert!(log.verify_integrity().is_ok());
             assert_eq!(log.entries_for_agent(agent).len(), 3);
         }
-
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn tampered_file_detected_on_load() {
-        let dir = std::env::temp_dir().join(format!("moat-audit-tamper-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let log_path = dir.join("audit.jsonl");
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("audit.jsonl");
 
         // Write entries
         {
@@ -438,7 +433,5 @@ mod tests {
         // Loading should detect tampering
         let result = AuditLog::with_persistence(log_path);
         assert!(result.is_err());
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
