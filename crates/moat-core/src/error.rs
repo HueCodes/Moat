@@ -41,6 +41,9 @@ pub enum MoatError {
     #[error("token chain invalid: {0}")]
     TokenChainInvalid(String),
 
+    #[error("agent revoked: {0}")]
+    AgentRevoked(Uuid),
+
     // --- Policy ---
     #[error("policy binding verification failed: expected {expected}, got {actual}")]
     PolicyBindingMismatch { expected: String, actual: String },

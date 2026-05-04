@@ -1,0 +1,12 @@
+[package]
+name = "sandbox-fs-attenuation"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+moat-core = { path = "../../crates/moat-core" }
+moat-runtime = { path = "../../crates/moat-runtime" }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+wat = "1"

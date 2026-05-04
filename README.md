@@ -12,6 +12,7 @@ Moat is a security runtime for AI agent frameworks (MCP, LangChain, CrewAI) that
 * **Runtime Monitor**: FSM transitions, sliding-window rate tracking, cross-agent pattern detection
 * **Secret Proxy**: Per-agent ACLs, opaque handles, point-of-use injection, revocable at runtime
 * **Replay Protection**: Per-sender monotonic sequence numbers, persisted across restarts
+* **Agent Revocation**: PEP-level revocation list; revoking an issuer transitively kills every token they signed, persisted across restarts
 * **Router**: Rate limiting, payload size caps, timestamp expiry, recipient existence checks
 * **Pure Rust**: No C bindings, no OpenSSL, no ring; the primitive stack is auditable
 * **WebAssembly Bindings**: TypeScript and JavaScript API via `wasm-bindgen`, published as `@moat/core`
@@ -65,7 +66,7 @@ cargo build --workspace
 cargo test --workspace
 ```
 
-86 tests across 6 crates.
+95 tests across 6 crates.
 
 ## Usage
 
@@ -194,7 +195,9 @@ MVP implementation. Implemented and tested:
 * Append-only audit log with SHA-256 hash chain plus optional JSONL persistence
 * Runtime monitor: FSM transitions, sliding-window rates, pattern detection
 * Secret proxy with per-agent ACLs, revocation, HTTP header injection
+* Agent revocation in the PEP: revoked sender IDs are blocked at stage 1, and any token chain whose issuer set includes a revoked agent is rejected at stage 3 (revoking a manager kills every token they signed)
 * Router with rate limiting, payload size caps, timestamp expiry, recipient existence checks
+* Filesystem attenuation: child tokens cannot grant FS paths outside their parent's grant, and sandbox preopens are derived directly from the token (see `examples/sandbox_fs_attenuation`)
 
 Known limitations:
 

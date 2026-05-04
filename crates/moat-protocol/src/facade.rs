@@ -45,6 +45,24 @@ impl Moat {
         self.router.pep.add_trusted_root(agent_id);
     }
 
+    /// Revoke an agent. Future messages from this agent are rejected, and any
+    /// in-flight delegation chain that lists this agent as an issuer is rejected
+    /// without the runtime needing to enumerate its descendants.
+    /// Persisted immediately if the PEP is configured with a state path.
+    pub fn revoke_agent(&mut self, agent_id: Uuid) -> bool {
+        self.router.pep.revoke(agent_id)
+    }
+
+    /// Lift a previously-issued revocation. Returns true if the agent was revoked.
+    pub fn unrevoke_agent(&mut self, agent_id: &Uuid) -> bool {
+        self.router.pep.unrevoke(agent_id)
+    }
+
+    /// Whether `agent_id` is currently revoked.
+    pub fn is_revoked(&self, agent_id: &Uuid) -> bool {
+        self.router.pep.is_revoked(agent_id)
+    }
+
     /// Route an authenticated message through the PEP.
     ///
     /// On success the router has: verified the message signature, checked replay
@@ -98,6 +116,7 @@ pub struct MoatBuilder {
     limits: Option<RouterLimits>,
     agents: Vec<AgentIdentity>,
     trusted_roots: Vec<Uuid>,
+    revoked: Vec<Uuid>,
     audit_path: Option<PathBuf>,
     pep_state_path: Option<PathBuf>,
 }
@@ -140,6 +159,13 @@ impl MoatBuilder {
         self
     }
 
+    /// Pre-populate the revocation set. Useful when seeding a new runtime from
+    /// an external revocation feed before processing any traffic.
+    pub fn revoke(mut self, agent_id: Uuid) -> Self {
+        self.revoked.push(agent_id);
+        self
+    }
+
     /// Persist the audit log to `path` (JSONL, fsync on append).
     pub fn persist_audit_to(mut self, path: PathBuf) -> Self {
         self.audit_path = Some(path);
@@ -175,6 +201,9 @@ impl MoatBuilder {
         }
         for root in self.trusted_roots {
             router.pep.add_trusted_root(root);
+        }
+        for revoked in self.revoked {
+            router.pep.revoke(revoked);
         }
 
         Ok(Moat { router })

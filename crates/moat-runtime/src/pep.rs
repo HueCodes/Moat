@@ -46,6 +46,11 @@ impl std::fmt::Display for PepStage {
 pub struct PepState {
     /// Last-seen sequence number per sender UUID.
     pub sequence_numbers: HashMap<Uuid, u64>,
+    /// Revoked agent IDs. Messages from these senders are rejected,
+    /// and any token chain whose issuer set intersects this is rejected.
+    /// `serde(default)` so older state files load without the field.
+    #[serde(default)]
+    pub revoked_agents: HashSet<Uuid>,
 }
 
 impl PepState {
@@ -78,7 +83,12 @@ pub struct PolicyEnforcementPoint {
     active_policy: PolicyBinding,
     /// Agent IDs that are trusted as root token issuers.
     trusted_roots: HashSet<Uuid>,
-    /// Optional path for persisting sequence state.
+    /// Revoked agent IDs. Reject messages from a revoked sender at stage 1,
+    /// and reject any chain whose root or any intermediate issuer is revoked
+    /// at stage 3. Revoking an upstream issuer therefore kills every token they
+    /// signed without the runtime needing to enumerate them.
+    revoked_agents: HashSet<Uuid>,
+    /// Optional path for persisting sequence + revocation state.
     state_path: Option<PathBuf>,
 }
 
@@ -89,12 +99,14 @@ impl PolicyEnforcementPoint {
             sequence_numbers: HashMap::new(),
             active_policy,
             trusted_roots: HashSet::new(),
+            revoked_agents: HashSet::new(),
             state_path: None,
         }
     }
 
     /// Create a PEP with persistent state. Loads existing state from `state_path`
-    /// if present, and persists sequence number updates after each successful evaluation.
+    /// if present, and persists sequence number + revocation updates after each
+    /// successful evaluation or revocation change.
     pub fn with_persistence(
         active_policy: PolicyBinding,
         state_path: PathBuf,
@@ -105,6 +117,7 @@ impl PolicyEnforcementPoint {
             sequence_numbers: state.sequence_numbers,
             active_policy,
             trusted_roots: HashSet::new(),
+            revoked_agents: state.revoked_agents,
             state_path: Some(state_path),
         })
     }
@@ -121,11 +134,51 @@ impl PolicyEnforcementPoint {
         self.trusted_roots.insert(agent_id);
     }
 
-    /// Persist current sequence state to disk (no-op if no state_path configured).
+    /// Mark an agent as revoked. Future messages from this agent are rejected,
+    /// and any token chain in which this agent appears as an issuer is rejected.
+    /// Persisted immediately so a crash between revoke and the next message
+    /// cannot resurrect the agent. Returns true if the set changed.
+    pub fn revoke(&mut self, agent_id: Uuid) -> bool {
+        let inserted = self.revoked_agents.insert(agent_id);
+        if inserted {
+            tracing::warn!(agent_id = %agent_id, "agent revoked");
+            if let Err(e) = self.persist_state() {
+                tracing::error!(error = %e, "failed to persist revocation");
+            }
+        }
+        inserted
+    }
+
+    /// Lift a revocation. Returns true if the agent was previously revoked.
+    /// Operational utility for un-doing a mistaken revocation; not a routine path.
+    pub fn unrevoke(&mut self, agent_id: &Uuid) -> bool {
+        let removed = self.revoked_agents.remove(agent_id);
+        if removed {
+            tracing::info!(agent_id = %agent_id, "revocation lifted");
+            if let Err(e) = self.persist_state() {
+                tracing::error!(error = %e, "failed to persist unrevoke");
+            }
+        }
+        removed
+    }
+
+    /// Whether this agent is currently revoked.
+    pub fn is_revoked(&self, agent_id: &Uuid) -> bool {
+        self.revoked_agents.contains(agent_id)
+    }
+
+    /// Snapshot of currently revoked agent IDs.
+    pub fn revoked_agents(&self) -> &HashSet<Uuid> {
+        &self.revoked_agents
+    }
+
+    /// Persist current sequence + revocation state to disk
+    /// (no-op if no state_path configured).
     fn persist_state(&self) -> Result<(), MoatError> {
         if let Some(ref path) = self.state_path {
             let state = PepState {
                 sequence_numbers: self.sequence_numbers.clone(),
+                revoked_agents: self.revoked_agents.clone(),
             };
             state.save(path)?;
         }
@@ -152,6 +205,18 @@ impl PolicyEnforcementPoint {
                 };
             }
         };
+
+        // Revocation cuts the sender off before signature verification spends CPU.
+        // Even if the signature is valid, a revoked agent's intent is no longer trusted.
+        if self.revoked_agents.contains(&message.sender_id) {
+            return PepDecision {
+                message_id: message.message_id,
+                sender_id: message.sender_id,
+                allowed: false,
+                stage_failed: Some(PepStage::SignatureVerification),
+                reason: Some(format!("sender {} is revoked", message.sender_id)),
+            };
+        }
 
         if let Err(e) = message.verify_signature(sender_identity) {
             return PepDecision {
@@ -228,6 +293,11 @@ impl PolicyEnforcementPoint {
     }
 
     /// Verify the full capability token chain from root to leaf.
+    ///
+    /// Revocation semantics: if any token in the chain (root, intermediate, or
+    /// leaf) was issued by a revoked agent, the chain is rejected. Revoking a
+    /// manager therefore invalidates every token they ever signed without the
+    /// runtime needing to walk the delegation graph.
     fn verify_token_chain(
         &self,
         leaf: &moat_core::CapabilityToken,
@@ -242,6 +312,9 @@ impl PolicyEnforcementPoint {
             }
             if !self.trusted_roots.contains(&leaf.issuer_id) {
                 return Err(MoatError::UntrustedTokenRoot(leaf.issuer_id));
+            }
+            if self.revoked_agents.contains(&leaf.issuer_id) {
+                return Err(MoatError::AgentRevoked(leaf.issuer_id));
             }
             let issuer_identity = self
                 .identities
@@ -261,6 +334,9 @@ impl PolicyEnforcementPoint {
         if !self.trusted_roots.contains(&root.issuer_id) {
             return Err(MoatError::UntrustedTokenRoot(root.issuer_id));
         }
+        if self.revoked_agents.contains(&root.issuer_id) {
+            return Err(MoatError::AgentRevoked(root.issuer_id));
+        }
 
         let root_identity = self
             .identities
@@ -279,6 +355,10 @@ impl PolicyEnforcementPoint {
                 )));
             }
 
+            if self.revoked_agents.contains(&child.issuer_id) {
+                return Err(MoatError::AgentRevoked(child.issuer_id));
+            }
+
             let issuer_identity = self
                 .identities
                 .get(&child.issuer_id)
@@ -293,6 +373,10 @@ impl PolicyEnforcementPoint {
                 "leaf parent {:?} doesn't match chain tail {}",
                 leaf.parent_token_id, last_chain.token_id,
             )));
+        }
+
+        if self.revoked_agents.contains(&leaf.issuer_id) {
+            return Err(MoatError::AgentRevoked(leaf.issuer_id));
         }
 
         let leaf_issuer = self
@@ -508,6 +592,152 @@ mod tests {
 
         let decision = pep.evaluate(&msg, "tool://anything", "execute");
         assert!(!decision.allowed, "forged token must be rejected");
+    }
+
+    #[test]
+    fn revoked_sender_rejected_at_signature_stage() {
+        let (sender, recipient, policy, mut pep) = setup();
+        pep.revoke(sender.id());
+
+        let msg = make_message(&sender, recipient.id(), &policy, 1);
+        let decision = pep.evaluate(&msg, "tool://review", "execute");
+
+        assert!(!decision.allowed);
+        assert_eq!(decision.stage_failed, Some(PepStage::SignatureVerification));
+        assert!(decision.reason.as_ref().unwrap().contains("revoked"));
+    }
+
+    #[test]
+    fn unrevoke_restores_access() {
+        let (sender, recipient, policy, mut pep) = setup();
+        pep.revoke(sender.id());
+        assert!(pep.is_revoked(&sender.id()));
+
+        let denied = pep.evaluate(
+            &make_message(&sender, recipient.id(), &policy, 1),
+            "tool://review",
+            "execute",
+        );
+        assert!(!denied.allowed);
+
+        assert!(pep.unrevoke(&sender.id()));
+        assert!(!pep.is_revoked(&sender.id()));
+
+        // A higher sequence number is required since the original `1` may have
+        // been recorded depending on stage of failure -- use 2 to be safe.
+        let allowed = pep.evaluate(
+            &make_message(&sender, recipient.id(), &policy, 2),
+            "tool://review",
+            "execute",
+        );
+        assert!(allowed.allowed, "unrevoked sender must succeed again");
+    }
+
+    #[test]
+    fn revoking_chain_root_invalidates_delegated_token() {
+        // Root issuer signs a delegation chain; revoking the root must invalidate
+        // every descendant without the PEP knowing what it issued.
+        let (sender, recipient, policy, mut pep) = setup();
+
+        let mut root_cap =
+            CapabilityToken::root(sender.id(), sender.id(), Utc::now() + Duration::hours(1));
+        root_cap.allowed = vec![ScopeEntry {
+            resource: "tool://*".into(),
+            actions: vec!["execute".into()],
+        }];
+        root_cap.sign(&sender);
+
+        let mut child_cap = root_cap
+            .attenuate(
+                recipient.id(),
+                vec![ScopeEntry {
+                    resource: "tool://review".into(),
+                    actions: vec!["execute".into()],
+                }],
+                vec![],
+                ResourceLimits::default(),
+                10,
+            )
+            .unwrap();
+        child_cap.sign(&sender);
+
+        let msg = AuthenticatedMessage::create(
+            &recipient,
+            sender.id(),
+            b"review".to_vec(),
+            child_cap,
+            vec![root_cap],
+            policy.clone(),
+            1,
+        )
+        .unwrap();
+
+        // Sanity: chain works pre-revocation
+        let before = pep.evaluate(&msg, "tool://review", "execute");
+        assert!(before.allowed, "should pass before revocation");
+
+        // Revoke the root issuer; the delegated token must now fail at stage 3
+        pep.revoke(sender.id());
+        let after = pep.evaluate(
+            &AuthenticatedMessage::create(
+                &recipient,
+                sender.id(),
+                b"review".to_vec(),
+                msg.capability_token.clone(),
+                msg.token_chain.clone(),
+                policy.clone(),
+                2,
+            )
+            .unwrap(),
+            "tool://review",
+            "execute",
+        );
+        assert!(!after.allowed, "delegated token must die with its issuer");
+        assert_eq!(after.stage_failed, Some(PepStage::CapabilityEvaluation));
+        assert!(after.reason.as_ref().unwrap().contains("revoked"));
+    }
+
+    #[test]
+    fn revocation_persists_across_restart() {
+        let dir = std::env::temp_dir().join(format!("moat-revoke-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state_path = dir.join("pep_state.json");
+        let policy = PolicyBinding::new("test-v1", b"test policy");
+
+        let sender = AgentKeypair::generate("sender").unwrap();
+        let recipient = AgentKeypair::generate("recipient").unwrap();
+
+        // PEP A: revoke the sender, drop PEP without explicit save.
+        {
+            let mut pep =
+                PolicyEnforcementPoint::with_persistence(policy.clone(), state_path.clone())
+                    .unwrap();
+            pep.register_identity(sender.identity.clone());
+            pep.register_identity(recipient.identity.clone());
+            pep.add_trusted_root(sender.id());
+            pep.revoke(sender.id());
+            assert!(pep.is_revoked(&sender.id()));
+        }
+
+        // PEP B: load from disk; sender must still be revoked.
+        {
+            let mut pep =
+                PolicyEnforcementPoint::with_persistence(policy.clone(), state_path.clone())
+                    .unwrap();
+            pep.register_identity(sender.identity.clone());
+            pep.register_identity(recipient.identity.clone());
+            pep.add_trusted_root(sender.id());
+
+            assert!(
+                pep.is_revoked(&sender.id()),
+                "revocation must survive restart"
+            );
+            let msg = make_message(&sender, recipient.id(), &policy, 1);
+            let decision = pep.evaluate(&msg, "tool://review", "execute");
+            assert!(!decision.allowed, "revoked sender must stay rejected");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **moat-runtime**: Agent revocation in the PEP (`revoke`, `unrevoke`, `is_revoked`). Revoked senders are rejected at stage 1; any token chain whose issuer set intersects the revocation list is rejected at stage 3, so revoking a manager transitively invalidates every token they signed without enumeration. Persisted alongside sequence-number state.
+- **moat-core**: Filesystem path subset check in `CapabilityToken::attenuate` — child `allowed_fs_read` / `allowed_fs_write` paths must be equal to or under one of the parent's paths. Path-component aware (`/tmp/foo` is not within `/tmp/foobar`).
+- **moat-protocol**: `Moat::{revoke_agent, unrevoke_agent, is_revoked}` and `MoatBuilder::revoke` for managing revocations through the facade.
+- **moat-core**: New `MoatError::AgentRevoked(Uuid)` variant.
+- New `examples/sandbox_fs_attenuation` showing capability tokens, attenuation rejection, and WASI preopens composing end-to-end.
+
 ## [0.1.0] - 2026-04-15
 
 ### Added

@@ -287,6 +287,23 @@ impl CapabilityToken {
             }
         }
 
+        // Filesystem: every child path must be equal to or under some parent path.
+        // Without this check a child token could request a broader preopen than
+        // its parent ever held -- the WASI sandbox would then honour it,
+        // breaking monotonic attenuation at the OS-confinement layer.
+        if !paths_are_subset(
+            &child.allowed_fs_read,
+            &self.resource_limits.allowed_fs_read,
+        ) {
+            return Err(MoatError::AttenuationViolation);
+        }
+        if !paths_are_subset(
+            &child.allowed_fs_write,
+            &self.resource_limits.allowed_fs_write,
+        ) {
+            return Err(MoatError::AttenuationViolation);
+        }
+
         Ok(())
     }
 }
@@ -317,6 +334,30 @@ fn resource_matches(pattern: &str, resource: &str) -> bool {
     } else {
         pattern == resource
     }
+}
+
+/// Whether every path in `child` is contained by some path in `parent`.
+/// An empty child set is always a subset (the child holds no FS access at all).
+fn paths_are_subset(child: &[String], parent: &[String]) -> bool {
+    child
+        .iter()
+        .all(|c| parent.iter().any(|p| path_within(c, p)))
+}
+
+/// Whether `child` is identical to or a descendant of `parent`. Path-component
+/// aware: `/tmp/foo` is not within `/tmp/foobar` even though the prefix matches
+/// as a string. Trailing slashes on either side are tolerated.
+fn path_within(child: &str, parent: &str) -> bool {
+    let parent = parent.trim_end_matches('/');
+    let child = child.trim_end_matches('/');
+    if child == parent {
+        return true;
+    }
+    // child must extend parent at a path-component boundary
+    let mut prefix = String::with_capacity(parent.len() + 1);
+    prefix.push_str(parent);
+    prefix.push('/');
+    child.starts_with(&prefix)
 }
 
 /// Check if child_pattern is a subset of parent_pattern.
@@ -448,6 +489,104 @@ mod tests {
             vec![],
             ResourceLimits {
                 max_fuel: Some(2_000_000),
+                ..Default::default()
+            },
+            10,
+        );
+        assert!(matches!(result, Err(MoatError::AttenuationViolation)));
+    }
+
+    #[test]
+    fn attenuate_path_within_parent_allowed() {
+        let (kp, mut parent) = root_token();
+        parent.resource_limits.allowed_fs_write = vec!["/tmp/parent".into()];
+        parent.sign(&kp);
+
+        // Child narrows to a subdirectory -- accepted
+        let child = parent.attenuate(
+            Uuid::new_v4(),
+            vec![],
+            vec![],
+            ResourceLimits {
+                max_fuel: Some(500_000),
+                max_memory_bytes: Some(32 * 1024 * 1024),
+                network_allowed: true,
+                allowed_hosts: vec!["api.example.com".into()],
+                allowed_fs_write: vec!["/tmp/parent/child".into()],
+                ..Default::default()
+            },
+            10,
+        );
+        assert!(child.is_ok());
+    }
+
+    #[test]
+    fn attenuate_path_outside_parent_rejected() {
+        let (kp, mut parent) = root_token();
+        parent.resource_limits.allowed_fs_write = vec!["/tmp/parent".into()];
+        parent.sign(&kp);
+
+        // Sibling directory -- not under parent -- must fail
+        let result = parent.attenuate(
+            Uuid::new_v4(),
+            vec![],
+            vec![],
+            ResourceLimits {
+                max_fuel: Some(500_000),
+                max_memory_bytes: Some(32 * 1024 * 1024),
+                network_allowed: true,
+                allowed_hosts: vec!["api.example.com".into()],
+                allowed_fs_write: vec!["/tmp/other".into()],
+                ..Default::default()
+            },
+            10,
+        );
+        assert!(matches!(result, Err(MoatError::AttenuationViolation)));
+    }
+
+    #[test]
+    fn attenuate_path_prefix_collision_rejected() {
+        // Regression: "/tmp/foo" must NOT be considered within "/tmp/foobar"
+        // even though the byte prefix matches.
+        let (kp, mut parent) = root_token();
+        parent.resource_limits.allowed_fs_write = vec!["/tmp/foobar".into()];
+        parent.sign(&kp);
+
+        let result = parent.attenuate(
+            Uuid::new_v4(),
+            vec![],
+            vec![],
+            ResourceLimits {
+                max_fuel: Some(500_000),
+                max_memory_bytes: Some(32 * 1024 * 1024),
+                network_allowed: true,
+                allowed_hosts: vec!["api.example.com".into()],
+                allowed_fs_write: vec!["/tmp/foo".into()],
+                ..Default::default()
+            },
+            10,
+        );
+        assert!(matches!(result, Err(MoatError::AttenuationViolation)));
+    }
+
+    #[test]
+    fn attenuate_cannot_gain_fs_access_from_nothing() {
+        // Parent has no FS access; child requesting any path is rejected.
+        let (kp, mut parent) = root_token();
+        parent.resource_limits.allowed_fs_read = vec![];
+        parent.resource_limits.allowed_fs_write = vec![];
+        parent.sign(&kp);
+
+        let result = parent.attenuate(
+            Uuid::new_v4(),
+            vec![],
+            vec![],
+            ResourceLimits {
+                max_fuel: Some(500_000),
+                max_memory_bytes: Some(32 * 1024 * 1024),
+                network_allowed: true,
+                allowed_hosts: vec!["api.example.com".into()],
+                allowed_fs_read: vec!["/tmp".into()],
                 ..Default::default()
             },
             10,
