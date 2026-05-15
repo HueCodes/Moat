@@ -6,9 +6,9 @@ Moat is a runtime that provides cryptographically enforced, sandboxed agent-to-a
 
 ## Threat Model
 
-Moat defends against five attack classes documented in the academic literature:
+Moat defends against five well-documented agent attack classes:
 
-1. **Skill Poisoning** (Taming OpenClaw): Malicious plugins replacing legitimate tools. Defense: cryptographic identity verification at registration, attestation-based trust.
+1. **Skill Poisoning**: Malicious plugins replacing legitimate tools. Defense: cryptographic identity verification at registration, attestation-based trust.
 2. **Indirect Prompt Injection**: External content hijacking control flow. Defense: strict data/control plane separation via sandbox isolation.
 3. **Memory Poisoning**: Fabricated rules injected into persistent memory. Defense: cross-sandbox state transfers treated as untrusted input.
 4. **Intent Drift**: Individually reasonable actions escalating into unauthorized behavior. Defense: runtime monitor tracking cumulative action trajectories.

@@ -4,7 +4,7 @@
 //! Detects "individually benign, collectively dangerous" patterns by monitoring
 //! cumulative trajectories against configurable thresholds.
 //!
-//! ## Advanced features (AgentGuard-style)
+//! ## Advanced features
 //!
 //! - **FSM state tracking**: Agents move through defined states (idle, executing,
 //!   requesting_secret, etc.) with validated transitions. Invalid transitions
